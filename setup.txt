@@ -1,0 +1,40 @@
+; -- PolicyMonitor_Installer.iss --
+
+[Setup]
+; Basic App Info
+AppName=Cal OSHA Policy Monitor
+AppVersion=1.0
+AppPublisher=Your Company Name
+DefaultDirName={autopf}\PolicyMonitor
+DefaultGroupName=Policy Monitor
+UninstallDisplayIcon={app}\PolicyMonitor.exe
+Compression=lzma2
+SolidCompression=yes
+OutputDir=C:\Users\YourName\Desktop\InstallerOutput
+OutputBaseFilename=PolicyMonitor_Setup
+
+[Tasks]
+; Creates checkboxes on the install screen
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "startup"; Description: "Automatically start Policy Monitor when Windows starts"; GroupDescription: "Startup Options";
+
+[Files]
+; IMPORTANT: Change these paths to point to the output folder from Auto PY to EXE
+; The asterisk (*) tells it to grab the .exe and everything else in that folder
+Source: "C:\Path\To\Your\Compiled\Folder\PolicyMonitor.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\Path\To\Your\Compiled\Folder\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+; Start Menu and Desktop Shortcuts
+Name: "{group}\Policy Monitor"; Filename: "{app}\PolicyMonitor.exe"
+Name: "{group}\Uninstall Policy Monitor"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Policy Monitor"; Filename: "{app}\PolicyMonitor.exe"; Tasks: desktopicon
+
+[Registry]
+; THIS IS THE MAGIC FOR STARTUP
+; It writes to the Windows Registry so the app boots when the user logs in
+Root: HKCU; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "PolicyMonitorApp"; ValueData: """{app}\PolicyMonitor.exe"""; Tasks: startup; Flags: uninsdeletevalue
+
+[Run]
+; Option to launch the app immediately after the installer finishes
+Filename: "{app}\PolicyMonitor.exe"; Description: "{cm:LaunchProgram,Policy Monitor}"; Flags: nowait postinstall skipifsilent
