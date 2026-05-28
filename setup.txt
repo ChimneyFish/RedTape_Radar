@@ -1,40 +1,48 @@
-; -- PolicyMonitor_Installer.iss --
+; -- Regulation_Monitoring_Installer.iss --
 
 [Setup]
 ; Basic App Info
-AppName=Cal OSHA Policy Monitor
+AppName=Regulation Monitoring
 AppVersion=1.0
 AppPublisher=Your Company Name
-DefaultDirName={autopf}\PolicyMonitor
-DefaultGroupName=Policy Monitor
-UninstallDisplayIcon={app}\PolicyMonitor.exe
+DefaultDirName={autopf}\Regulation_Monitoring
+DefaultGroupName=Regulation Monitoring
+
+; Sets the icon for the Add/Remove Programs list in Windows
+UninstallDisplayIcon={app}\Regulation_Monitoring.exe
+
+; Sets the icon for the Setup.exe installer file itself
+SetupIconFile=C:\Users\hotty\Downloads\Regulation_monitoring\Regulation_Monitoring.ico
+
 Compression=lzma2
 SolidCompression=yes
-OutputDir=C:\Users\YourName\Desktop\InstallerOutput
-OutputBaseFilename=PolicyMonitor_Setup
+
+; Outputs the final installer to your Desktop so it is easy to find
+OutputDir={userdesktop}
+OutputBaseFilename=Regulation_Monitoring_Setup
 
 [Tasks]
 ; Creates checkboxes on the install screen
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "startup"; Description: "Automatically start Policy Monitor when Windows starts"; GroupDescription: "Startup Options";
+Name: "startup"; Description: "Automatically start Regulation Monitoring when Windows starts"; GroupDescription: "Startup Options";
 
 [Files]
-; IMPORTANT: Change these paths to point to the output folder from Auto PY to EXE
-; The asterisk (*) tells it to grab the .exe and everything else in that folder
-Source: "C:\Path\To\Your\Compiled\Folder\PolicyMonitor.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Path\To\Your\Compiled\Folder\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Grabs the main executable
+Source: "C:\Users\hotty\Downloads\Regulation_monitoring\Regulation_Monitoring.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+; Grabs the _internal folder, the .ico, and everything else in that directory
+Source: "C:\Users\hotty\Downloads\Regulation_monitoring\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 ; Start Menu and Desktop Shortcuts
-Name: "{group}\Policy Monitor"; Filename: "{app}\PolicyMonitor.exe"
-Name: "{group}\Uninstall Policy Monitor"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Policy Monitor"; Filename: "{app}\PolicyMonitor.exe"; Tasks: desktopicon
+Name: "{group}\Regulation Monitoring"; Filename: "{app}\Regulation_Monitoring.exe"; IconFilename: "{app}\Regulation_Monitoring.ico"
+Name: "{group}\Uninstall Regulation Monitoring"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Regulation Monitoring"; Filename: "{app}\Regulation_Monitoring.exe"; IconFilename: "{app}\Regulation_Monitoring.ico"; Tasks: desktopicon
 
 [Registry]
-; THIS IS THE MAGIC FOR STARTUP
-; It writes to the Windows Registry so the app boots when the user logs in
-Root: HKCU; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "PolicyMonitorApp"; ValueData: """{app}\PolicyMonitor.exe"""; Tasks: startup; Flags: uninsdeletevalue
+; Writes to the Windows Registry so the app boots when the user logs in
+Root: HKCU; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "RegulationMonitoringApp"; ValueData: """{app}\Regulation_Monitoring.exe"""; Tasks: startup; Flags: uninsdeletevalue
 
 [Run]
 ; Option to launch the app immediately after the installer finishes
-Filename: "{app}\PolicyMonitor.exe"; Description: "{cm:LaunchProgram,Policy Monitor}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Regulation_Monitoring.exe"; Description: "{cm:LaunchProgram,Regulation Monitoring}"; Flags: nowait postinstall skipifsilent
