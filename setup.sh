@@ -7,7 +7,15 @@ echo "===================================================="
 echo "🚀 INITIATING REDTAPE RADAR ZERO-TOUCH DEPLOYMENT..."
 echo "===================================================="
 
-# 1. CAPTURE ADMIN CREDENTIALS INTERACTIVELY
+# 1. NETWORK & IP BINDING CONFIGURATION
+DEFAULT_IP=$(hostname -I | awk '{print $1}')
+echo "Network Configuration:"
+read -p "Enter the IP address to bind the web server to [$DEFAULT_IP]: " BIND_IP
+BIND_IP=${BIND_IP:-$DEFAULT_IP}
+echo "-> Service will strictly bind to $BIND_IP"
+echo ""
+
+# 2. CAPTURE ADMIN CREDENTIALS INTERACTIVELY
 echo "Please configure your Local 'Break-Glass' Admin Account."
 read -p "Enter Admin Email (e.g., admin@domain.com): " ADMIN_EMAIL
 read -s -p "Enter Admin Password: " ADMIN_PASSWORD
@@ -242,9 +250,6 @@ async def update_settings(request: Request, db: Session = Depends(get_db), admin
             db.add(new_item)
     db.commit()
     return RedirectResponse(url="/settings?success=true", status_code=303)
-
-if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
 EOF
 
 # --- APP/TASKS.PY ---
@@ -270,7 +275,7 @@ cat << 'EOF' > "$PROJECT_ROOT/app/templates/base.html"
     <title>{% block title %}RedTape Radar{% endblock %}</title>
     <style>
         body { font-family: system-ui, sans-serif; margin: 0; background: #f4f7f6; color: #333; }
-        .navbar { background: #0b2b40; color: white; padding: 15px 20px; display: flex; justify-content: space-between; }
+        .navbar { background: #0b2b40; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center;}
         .navbar a { color: white; text-decoration: none; margin-left: 20px; font-weight: 500; }
         .container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
         .card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
@@ -329,7 +334,7 @@ cat << 'EOF' > "$PROJECT_ROOT/app/templates/settings.html"
 {% endblock %}
 EOF
 
-# --- TEMPLATES/DASHBOARD.HTML & TRIAGE.HTML (Stubs for completion) ---
+# --- TEMPLATES/DASHBOARD.HTML & TRIAGE.HTML (Stubs) ---
 cat << 'EOF' > "$PROJECT_ROOT/app/templates/dashboard.html"
 {% extends "base.html" %}{% block content %}<h1>Dashboard</h1><p>Welcome, {{ user.name }}</p>{% endblock %}
 EOF
@@ -345,11 +350,9 @@ pip install --upgrade pip > /dev/null 2>&1
 pip install -r requirements.txt > /dev/null 2>&1
 
 echo "[6/8] Executing Database Build and Injecting Admin Credentials..."
-# Create the python script to inject the admin, run it, and delete it so credentials aren't left in a file.
 cat << 'EOF' > "$PROJECT_ROOT/create_admin.py"
 import sys
-from app.database import SessionLocal, engine, Base
-from app.models import User
+from app.models import SessionLocal, engine, Base, User
 from app.auth import get_password_hash
 
 Base.metadata.create_all(bind=engine)
@@ -378,7 +381,8 @@ After=network.target
 User=$USER_NAME
 WorkingDirectory=$PROJECT_ROOT
 Environment="PATH=$PROJECT_ROOT/venv/bin"
-ExecStart=$PROJECT_ROOT/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+# INJECTING BIND_IP DIRECTLY INTO UVICORN COMMAND
+ExecStart=$PROJECT_ROOT/venv/bin/uvicorn app.main:app --host $BIND_IP --port 8000
 Restart=always
 
 [Install]
@@ -387,14 +391,14 @@ EOF
 
 cat << EOF > /etc/systemd/system/redtape-celery.service
 [Unit]
-Description=RedTape Radar Celery Worker
+Description=RedTape Radar Celery Worker & Scheduler
 After=network.target redis-server.service
 
 [Service]
 User=$USER_NAME
 WorkingDirectory=$PROJECT_ROOT
 Environment="PATH=$PROJECT_ROOT/venv/bin"
-ExecStart=$PROJECT_ROOT/venv/bin/celery -A app.tasks worker --loglevel=info
+ExecStart=$PROJECT_ROOT/venv/bin/celery -A app.tasks worker -B --loglevel=info
 Restart=always
 
 [Install]
@@ -409,6 +413,8 @@ systemctl restart redtape-web redtape-celery redis-server
 echo "===================================================="
 echo "✅ REDTAPE RADAR IS LIVE!"
 echo "===================================================="
-echo "Navigate to: http://$(hostname -I | awk '{print $1}'):8000/local-login"
-echo "Login with: $ADMIN_EMAIL"
+echo "Access points:"
+echo "IP Address:   http://$BIND_IP:8000/local-login"
+echo "DNS Routing:  http://redtapealert.company.com:8000/local-login"
+echo "Login with:   $ADMIN_EMAIL"
 echo "===================================================="
