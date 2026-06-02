@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Triage Inbox - RedTape Radar</title>
+</head>
+<body>
+    <h1>PAAS Triage Inbox</h1>
+    <a href="/"><- Back to Dashboard</a>
+    <hr>
+
+    <h2>Pending AI Drafts</h2>
+    {% for draft in drafts %}
+        <div style="border: 1px solid black; padding: 10px; margin-bottom: 20px;">
+            <h3>[{{ draft.target.resource }}] {{ draft.topic }}</h3>
+            <p><strong>AI Summary:</strong> {{ draft.summary_raw }}</p>
+            <p><strong>Detected Dates:</strong> {{ draft.detected_dates }}</p>
+            
+            <form action="/api/drafts/{{ draft.id }}/approve" method="post">
+                <label>Actionable Steps (Required):</label><br>
+                <textarea name="actionable_steps" rows="3" cols="50" required></textarea><br><br>
+                
+                <label>Key Deadlines (Optional):</label><br>
+                <input type="text" name="key_deadlines"><br><br>
+                
+                <button type="submit">Approve & Publish</button>
+            </form>
+        </div>
+    {% else %}
+        <p>You're all caught up! No pending drafts.</p>
+    {% endfor %}
+
+</body>
+</html>
