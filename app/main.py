@@ -17,12 +17,12 @@ async def unauthorized_redirect(request: Request, exc: HTTPException):
 @app.get("/", response_class=HTMLResponse)
 async def view_dashboard(request: Request, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     alerts = db.query(PublishedAlert).order_by(PublishedAlert.published_at.desc()).limit(50).all()
-    return templates.TemplateResponse("dashboard.html", {"request": request, "user": current_user, "alerts": alerts})
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={"user": current_user, "alerts": alerts})
 
 @app.get("/triage", response_class=HTMLResponse)
 async def view_triage_inbox(request: Request, db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
     drafts = db.query(AlertDraft).filter(AlertDraft.is_reviewed == False).all()
-    return templates.TemplateResponse("triage.html", {"request": request, "user": admin_user, "drafts": drafts})
+    return templates.TemplateResponse(request=request, name="triage.html", context={"user": admin_user, "drafts": drafts})
 
 @app.get("/settings", response_class=HTMLResponse)
 async def view_settings(request: Request, db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
@@ -30,17 +30,17 @@ async def view_settings(request: Request, db: Session = Depends(get_db), admin_u
     settings_dict = {cfg.key: cfg.value for cfg in configs}
     defaults = {"entra_tenant_id": "", "entra_client_id": "", "entra_admin_group_id": "", "confluence_url": "", "confluence_email": "", "confluence_api_token": ""}
     current_settings = {**defaults, **settings_dict}
-    return templates.TemplateResponse("settings.html", {"request": request, "user": admin_user, "settings": current_settings})
+    return templates.TemplateResponse(request=request, name="settings.html", context={"user": admin_user, "settings": current_settings})
 
 @app.get("/local-login", response_class=HTMLResponse)
 async def view_local_login(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "user": None, "error": None})
+    return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": None})
 
 @app.post("/api/local-login")
 async def process_local_login(request: Request, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email, User.is_local == True).first()
     if not user or not auth.verify_password(password, user.hashed_password):
-        return templates.TemplateResponse("login.html", {"request": request, "user": None, "error": "Invalid credentials"})
+        return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": "Invalid credentials"})
     token = auth.create_local_token(user.email)
     response = RedirectResponse(url="/settings", status_code=303)
     response.set_cookie(key="local_admin_session", value=token, httponly=True, max_age=3600)
@@ -58,6 +58,20 @@ async def update_settings(request: Request, db: Session = Depends(get_db), admin
     db.commit()
     return RedirectResponse(url="/settings?success=true", status_code=303)
 
+# RESTORED ROUTE: Allows admins to add new URLs to be scanned by Celery/Ollama
+@app.post("/api/targets")
+async def add_monitored_target(
+    url: str = Form(...), 
+    resource: str = Form(...), 
+    mode: str = Form("auto_clean"),
+    db: Session = Depends(get_db), 
+    admin_user: User = Depends(auth.require_admin)
+):
+    new_target = MonitoredTarget(url=url, resource=resource, extraction_mode=mode)
+    db.add(new_target)
+    db.commit()
+    return RedirectResponse(url="/triage", status_code=303)
+
 @app.post("/api/drafts/{draft_id}/approve")
 async def approve_ai_draft(
     draft_id: int, 
@@ -66,12 +80,10 @@ async def approve_ai_draft(
     db: Session = Depends(get_db), 
     admin_user: User = Depends(auth.require_admin)
 ):
-    # 1. Fetch the Draft
     draft = db.query(AlertDraft).filter(AlertDraft.id == draft_id).first()
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
 
-    # 2. Save to Local Dashboard
     published = PublishedAlert(
         resource=draft.target.resource, 
         url=draft.target.url,
@@ -84,8 +96,6 @@ async def approve_ai_draft(
     draft.is_reviewed = True
     db.commit()
 
-    # 3. Push to Confluence
-    # Pull dynamic settings configured in the Web UI
     config = {cfg.key: cfg.value for cfg in db.query(AppConfig).all()}
     conf_url = config.get("confluence_url")
     conf_email = config.get("confluence_email")
@@ -94,8 +104,6 @@ async def approve_ai_draft(
     if conf_url and conf_email and conf_token:
         try:
             import requests
-            
-            # Create the HTML table row for Confluence
             new_row = f"""
             <tr>
                 <td>{published.resource}</td>
@@ -105,13 +113,10 @@ async def approve_ai_draft(
                 <td>{published.actionable_steps} - Due: {published.key_deadlines}</td>
             </tr>
             """
-            
-            # Note: You will need to specify the exact Page ID in your settings or hardcode it here
             PAGE_ID = "YOUR_CONFLUENCE_PAGE_ID" 
             api_endpoint = f"{conf_url.rstrip('/')}/wiki/rest/api/content/{PAGE_ID}"
             auth_tuple = (conf_email, conf_token)
             
-            # Fetch current page, inject row, and push update (Standard Atlassian API flow)
             current_page = requests.get(f"{api_endpoint}?expand=body.storage", auth=auth_tuple).json()
             if 'body' in current_page:
                 current_html = current_page['body']['storage']['value']
