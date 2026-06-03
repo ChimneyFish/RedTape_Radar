@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width: 400px; margin: 0 auto; text-align: center;">
+    <h2>Local Admin Login</h2>
+    {% if error %}<p style="color: red;">{{ error }}</p>{% endif %}
+    <form action="/api/local-login" method="post">
+        <input type="email" name="email" placeholder="Admin Email" required style="width: 90%; padding: 10px; margin-bottom: 15px;"><br>
+        <input type="password" name="password" placeholder="Password" required style="width: 90%; padding: 10px; margin-bottom: 15px;"><br>
+        <button type="submit" style="width: 95%;">Authenticate</button>
+    </form>
+</div>
+{% endblock %}

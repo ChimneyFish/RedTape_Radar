@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>System Configuration</h1>
+<form action="/api/settings/update" method="post">
+    <div class="card">
+        <h2>Microsoft Entra ID (SSO)</h2>
+        <label>Tenant ID:</label><br><input type="text" name="entra_tenant_id" value="{{ settings.entra_tenant_id }}" size="50"><br><br>
+        <label>Client ID:</label><br><input type="text" name="entra_client_id" value="{{ settings.entra_client_id }}" size="50"><br><br>
+        <label>Admin Security Group Object ID:</label><br><input type="text" name="entra_admin_group_id" value="{{ settings.entra_admin_group_id }}" size="50">
+    </div>
+    <div class="card">
+        <h2>Confluence Integration</h2>
+        <label>Workspace URL:</label><br><input type="text" name="confluence_url" value="{{ settings.confluence_url }}" size="50"><br><br>
+        <label>Service Email:</label><br><input type="text" name="confluence_email" value="{{ settings.confluence_email }}" size="50"><br><br>
+        <label>API Token:</label><br><input type="password" name="confluence_api_token" value="{{ settings.confluence_api_token }}" size="50">
+    </div>
+    <button type="submit" style="background-color: #28a745;">Save Configuration</button>
+</form>
+{% endblock %}

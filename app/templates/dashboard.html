@@ -1,40 +1,18 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>RedTape Radar - Dashboard</title>
-</head>
-<body>
-    <h1>RedTape Radar Dashboard</h1>
-    <p>Welcome, {{ user.name }} | Role: {{ user.role }}</p>
-    
-    {% if user.role == 'admin' %}
-        <a href="/triage">Go to Triage Inbox -></a>
-    {% endif %}
-
-    <hr>
-    <h2>Recent Regulatory Updates</h2>
-    
-    <table border="1">
-        <tr>
-            <th>Resource</th>
-            <th>Topic</th>
-            <th>Summary</th>
-            <th>Actionable Items</th>
-            <th>Key Deadlines</th>
-            <th>Link</th>
-        </tr>
-        {% for alert in alerts %}
-        <tr>
-            <td>{{ alert.resource }}</td>
-            <td>{{ alert.topic }}</td>
-            <td>{{ alert.summary }}</td>
-            <td>{{ alert.actionable_steps }}</td>
-            <td>{{ alert.key_deadlines }}</td>
-            <td><a href="{{ alert.url }}">Source</a></td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6">No recent updates found.</td></tr>
-        {% endfor %}
-    </table>
-</body>
-</html>
+{% extends "base.html" %}
+{% block content %}
+<h1>Dashboard</h1>
+<p>Welcome, {{ user.name }}</p>
+<table border="1" width="100%" style="background: white; border-collapse: collapse;">
+    <tr><th>Resource</th><th>Topic</th><th>Summary</th><th>Actionable Steps</th></tr>
+    {% for alert in alerts %}
+    <tr>
+        <td>{{ alert.resource }}</td>
+        <td>{{ alert.topic }}</td>
+        <td>{{ alert.summary }}</td>
+        <td>{{ alert.actionable_steps }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">No alerts published yet.</td></tr>
+    {% endfor %}
+</table>
+{% endblock %}
