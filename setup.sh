@@ -7,15 +7,7 @@ echo "===================================================="
 echo "🚀 INITIATING REDTAPE RADAR ZERO-TOUCH DEPLOYMENT..."
 echo "===================================================="
 
-# 1. NETWORK & IP BINDING CONFIGURATION
-DEFAULT_IP=$(hostname -I | awk '{print $1}')
-echo "Network Configuration:"
-read -p "Enter the IP address to bind the web server to [$DEFAULT_IP]: " BIND_IP
-BIND_IP=${BIND_IP:-$DEFAULT_IP}
-echo "-> Service will strictly bind to $BIND_IP"
-echo ""
-
-# 2. CAPTURE ADMIN CREDENTIALS INTERACTIVELY
+# 1. CAPTURE ADMIN CREDENTIALS INTERACTIVELY
 echo "Please configure your Local 'Break-Glass' Admin Account."
 read -p "Enter Admin Email (e.g., admin@domain.com): " ADMIN_EMAIL
 read -s -p "Enter Admin Password: " ADMIN_PASSWORD
@@ -56,7 +48,8 @@ beautifulsoup4>=4.12.0
 jira>=3.6.0
 celery>=5.3.0
 redis>=5.0.0
-passlib[bcrypt]>=1.7.4
+passlib>=1.7.4
+bcrypt==3.2.2
 python-jose[cryptography]>=3.3.0
 python-multipart>=0.0.9
 EOF
@@ -381,8 +374,7 @@ After=network.target
 User=$USER_NAME
 WorkingDirectory=$PROJECT_ROOT
 Environment="PATH=$PROJECT_ROOT/venv/bin"
-# INJECTING BIND_IP DIRECTLY INTO UVICORN COMMAND
-ExecStart=$PROJECT_ROOT/venv/bin/uvicorn app.main:app --host $BIND_IP --port 8000
+ExecStart=$PROJECT_ROOT/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 
 [Install]
@@ -410,11 +402,13 @@ systemctl daemon-reload
 systemctl enable redtape-web redtape-celery redis-server
 systemctl restart redtape-web redtape-celery redis-server
 
+IP_ADDRESS=$(hostname -I | awk '{print $1}')
+
 echo "===================================================="
 echo "✅ REDTAPE RADAR IS LIVE!"
 echo "===================================================="
 echo "Access points:"
-echo "IP Address:   http://$BIND_IP:8000/local-login"
+echo "IP Address:   http://$IP_ADDRESS:8000/local-login"
 echo "DNS Routing:  http://redtapealert.company.com:8000/local-login"
 echo "Login with:   $ADMIN_EMAIL"
 echo "===================================================="
