@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles # NEW: Import StaticFiles
 from sqlalchemy.orm import Session
 import uvicorn
 from .models import engine, Base, get_db, PublishedAlert, AlertDraft, MonitoredTarget, AppConfig, User
@@ -8,6 +9,9 @@ from . import auth
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="RedTape Radar")
+
+# NEW: Mount the static directory so the browser can download icon.png
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 @app.exception_handler(401)

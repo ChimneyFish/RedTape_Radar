@@ -6,6 +6,12 @@
         body { font-family: system-ui, sans-serif; margin: 0; background: #f4f7f6; color: #333; }
         .navbar { background: #0b2b40; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center;}
         .navbar a { color: white; text-decoration: none; margin-left: 20px; font-weight: 500; }
+        
+        /* NEW: Flexbox layout for the logo container */
+        .logo-container { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { height: 32px; width: 32px; object-fit: contain; }
+        .logo-text { font-size: 1.2rem; font-weight: bold; letter-spacing: 0.5px; }
+
         .container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
         .card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
         button { background: #0263e0; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
@@ -13,7 +19,11 @@
 </head>
 <body>
     <nav class="navbar">
-        <div class="logo"><strong>RedTape Radar</strong></div>
+        <div class="logo-container">
+            <img src="/static/icon.png" alt="Radar Icon" class="logo-icon">
+            <span class="logo-text">RedTape Radar</span>
+        </div>
+        
         <div class="nav-links">
             <a href="/">Dashboard</a>
             {% if user and user.role == 'admin' %}
