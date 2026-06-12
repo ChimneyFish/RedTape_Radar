@@ -11,7 +11,6 @@ read -s -p "Enter Admin Password: " ADMIN_PASSWORD
 echo ""
 
 PROJECT_ROOT="$HOME/redtape_radar"
-USER_NAME=$(logname || echo $SUDO_USER || whoami)
 BIND_IP=$(hostname -I | awk '{print $1}')
 
 echo "----------------------------------------------------"
@@ -47,7 +46,7 @@ EOF
 python3 create_admin.py "$ADMIN_EMAIL" "$ADMIN_PASSWORD"
 rm "$PROJECT_ROOT/create_admin.py"
 
-echo "Configuring Systemd Daemons to run as ROOT to prevent permission errors..."
+echo "Configuring Systemd Daemons to run securely..."
 
 sudo bash -c "cat << EOF > /etc/systemd/system/redtape-web.service
 [Unit]

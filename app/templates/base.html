@@ -20,6 +20,9 @@
             <a href="/triage">Triage Inbox</a>
             <a href="/settings">Settings</a>
             {% endif %}
+            {% if user %}
+            <a href="/logout" style="color: #ffcccc; margin-left: 40px;">Logout</a>
+            {% endif %}
         </div>
     </nav>
     <div class="container">{% block content %}{% endblock %}</div>

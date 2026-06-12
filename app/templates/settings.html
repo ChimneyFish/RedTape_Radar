@@ -1,19 +1,74 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>System Configuration</h1>
+
+<div class="card">
+    <h2>User Management</h2>
+    <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
+        <tr><th>Name</th><th>Email</th><th>Role</th></tr>
+        {% for u in system_users %}
+        <tr><td>{{ u.name }}</td><td>{{ u.email }}</td><td>{{ u.role }}</td></tr>
+        {% endfor %}
+    </table>
+    
+    <h3>Create New User</h3>
+    <form action="/api/users/create" method="post" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
+        <input type="text" name="name" placeholder="Full Name" required style="margin-bottom: 10px;"><br>
+        <input type="email" name="email" placeholder="Email Address" required style="margin-bottom: 10px;"><br>
+        <input type="password" name="password" placeholder="Temporary Password" required style="margin-bottom: 10px;"><br>
+        <select name="role" style="margin-bottom: 10px;">
+            <option value="read_only">Read Only (Dashboard Access)</option>
+            <option value="admin">Admin (Triage & Settings Access)</option>
+        </select><br>
+        <button type="submit" style="background-color: #17a2b8;">Add User</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Monitored Websites</h2>
+    <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
+        <tr><th>Resource Name</th><th>URL</th><th>Last Scanned</th><th>Action</th></tr>
+        {% for target in targets %}
+        <tr>
+            <td>{{ target.resource }}</td>
+            <td><a href="{{ target.url }}" target="_blank">{{ target.url }}</a></td>
+            <td>{{ target.last_scanned.strftime('%Y-%m-%d %H:%M') if target.last_scanned else 'Never' }}</td>
+            <td>
+                <form action="/api/targets/{{ target.id }}/delete" method="post" style="display:inline;">
+                    <button type="submit" style="background-color: #dc3545; padding: 5px 10px;">Remove</button>
+                </form>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">No targets are currently being monitored.</td></tr>
+        {% endfor %}
+    </table>
+
+    <h3>Add New Target</h3>
+    <form action="/api/targets" method="post" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
+        <input type="text" name="resource" placeholder="Resource Name (e.g., OSHA)" required style="margin-bottom: 10px; width: 45%;">&nbsp;
+        <input type="url" name="url" placeholder="https://..." required style="margin-bottom: 10px; width: 45%;"><br>
+        <button type="submit" style="background-color: #17a2b8;">Add to Radar</button>
+    </form>
+</div>
+
 <form action="/api/settings/update" method="post">
     <div class="card">
-        <h2>Microsoft Entra ID (SSO)</h2>
-        <label>Tenant ID:</label><br><input type="text" name="entra_tenant_id" value="{{ settings.entra_tenant_id }}" size="50"><br><br>
-        <label>Client ID:</label><br><input type="text" name="entra_client_id" value="{{ settings.entra_client_id }}" size="50"><br><br>
-        <label>Admin Security Group Object ID:</label><br><input type="text" name="entra_admin_group_id" value="{{ settings.entra_admin_group_id }}" size="50">
+        <h2>AI Scan Engine Settings</h2>
+        <label>How often should RedTape Radar scan targets for changes?</label><br><br>
+        <select name="scan_frequency" style="padding: 5px; font-size: 16px;">
+            <option value="hourly" {% if settings.scan_frequency == 'hourly' %}selected{% endif %}>Hourly</option>
+            <option value="daily" {% if settings.scan_frequency == 'daily' %}selected{% endif %}>Daily</option>
+            <option value="weekly" {% if settings.scan_frequency == 'weekly' %}selected{% endif %}>Weekly</option>
+        </select>
     </div>
+
     <div class="card">
         <h2>Confluence Integration</h2>
         <label>Workspace URL:</label><br><input type="text" name="confluence_url" value="{{ settings.confluence_url }}" size="50"><br><br>
         <label>Service Email:</label><br><input type="text" name="confluence_email" value="{{ settings.confluence_email }}" size="50"><br><br>
         <label>API Token:</label><br><input type="password" name="confluence_api_token" value="{{ settings.confluence_api_token }}" size="50">
     </div>
-    <button type="submit" style="background-color: #28a745;">Save Configuration</button>
+    <button type="submit" style="background-color: #28a745;">Save System Configuration</button>
 </form>
 {% endblock %}

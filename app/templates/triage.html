@@ -12,4 +12,7 @@
         <button type="submit">Approve & Publish</button>
     </form>
 </div>
+{% else %}
+<p>No new drafts pending review.</p>
+{% endfor %}
 {% endblock %}

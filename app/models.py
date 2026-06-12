@@ -32,7 +32,7 @@ class MonitoredTarget(Base):
     url = Column(String(2048), unique=True, nullable=False)
     extraction_mode = Column(String(20), default="auto_clean")
     keyword_anchor = Column(String(100), nullable=True)
-    last_scanned = Column(DateTime, default=datetime.utcnow)
+    last_scanned = Column(DateTime, nullable=True)
     last_hash = Column(String(64), nullable=True)
     is_active = Column(Boolean, default=True)
     drafts = relationship("AlertDraft", back_populates="target", cascade="all, delete-orphan")
