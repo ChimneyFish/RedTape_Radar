@@ -5,7 +5,6 @@ echo "===================================================="
 echo "🚀 CONFIGURING REDTAPE RADAR INFRASTRUCTURE..."
 echo "===================================================="
 
-# 1. Capture Admin Credentials
 read -p "Enter Admin Email (e.g., admin@domain.com): " ADMIN_EMAIL
 read -s -p "Enter Admin Password: " ADMIN_PASSWORD
 echo ""
@@ -14,16 +13,30 @@ PROJECT_ROOT="$HOME/RedTape_Radar"
 BIND_IP=$(hostname -I | awk '{print $1}')
 
 echo "----------------------------------------------------"
-echo "Installing System Dependencies (Redis & Python venv)..."
+echo "Installing System Dependencies..."
 sudo apt-get update -y
-sudo apt-get install -y python3-venv python3-pip redis-server
+sudo apt-get install -y python3-venv python3-pip redis-server curl
 
-echo "Creating Python Virtual Environment and installing packages..."
+echo "Installing Ollama AI Engine..."
+if ! command -v ollama &> /dev/null; then
+    curl -fsSL https://ollama.com/install.sh | sh
+    sudo systemctl enable ollama
+    sudo systemctl start ollama
+    echo "Pulling Default AI Model (llama3) - This may take a few minutes..."
+    ollama pull llama3
+else
+    echo "Ollama is already installed. Skipping..."
+fi
+
+echo "Creating Python Virtual Environment..."
 cd "$PROJECT_ROOT"
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip > /dev/null 2>&1
 pip install -r requirements.txt
+
+echo "Wiping legacy database to apply new architectural schema..."
+rm -f "$PROJECT_ROOT/redtape_radar.db"
 
 echo "Executing Database Build and Injecting Admin Credentials..."
 cat << 'EOF' > "$PROJECT_ROOT/create_admin.py"
@@ -46,7 +59,7 @@ EOF
 python3 create_admin.py "$ADMIN_EMAIL" "$ADMIN_PASSWORD"
 rm "$PROJECT_ROOT/create_admin.py"
 
-echo "Configuring Systemd Daemons to run securely..."
+echo "Configuring Systemd Daemons..."
 
 sudo bash -c "cat << EOF > /etc/systemd/system/redtape-web.service
 [Unit]

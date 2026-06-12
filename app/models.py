@@ -29,9 +29,10 @@ class MonitoredTarget(Base):
     __tablename__ = "monitored_targets"
     id = Column(Integer, primary_key=True, index=True)
     resource = Column(String(50), nullable=False)
-    url = Column(String(2048), unique=True, nullable=False)
+    url = Column(String(2048), nullable=False)
     extraction_mode = Column(String(20), default="auto_clean")
-    keyword_anchor = Column(String(100), nullable=True)
+    scan_frequency = Column(String(20), default="weekly")
+    recursive = Column(Boolean, default=False)
     last_scanned = Column(DateTime, nullable=True)
     last_hash = Column(String(64), nullable=True)
     is_active = Column(Boolean, default=True)
