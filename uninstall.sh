@@ -1,58 +1,62 @@
 #!/bin/bash
-
-# Exit on error, but we will allow certain commands to fail gracefully if things are already deleted
 set -e
 
 echo "===================================================="
-echo "⚠️  INITIATING REDTAPE RADAR UNINSTALLATION"
+echo "🛑 REDTAPE RADAR UNINSTALLER"
 echo "===================================================="
-echo "WARNING: This is a destructive action."
-echo "This will COMPLETELY REMOVE the RedTape Radar application,"
-echo "including the local SQLite database, all saved configurations,"
-echo "and the systemd background services."
+
+# Ensure script is run with sudo permissions
+if [ "$EUID" -ne 0 ]; then
+  echo "❌ Please run this script with sudo privileges:"
+  echo "sudo ./uninstall.sh"
+  exit 1
+fi
+
+PROJECT_ROOT="/root/redtape_radar"
+# Fallback check if it's placed in a user home directory
+if [ ! -d "$PROJECT_ROOT" ]; then
+    PROJECT_ROOT="$(dirname "$(readlink -f "$0")")"
+fi
+
+echo "Stopping RedTape Radar systemd services..."
+sudo systemctl stop redtape-web.service || true
+sudo systemctl stop redtape-celery.service || true
+
+echo "Disabling background daemons..."
+sudo systemctl disable redtape-web.service || true
+sudo systemctl disable redtape-celery.service || true
+
+echo "Removing systemd configuration files..."
+sudo rm -f /etc/systemd/system/redtape-web.service
+sudo rm -f /etc/systemd/system/redtape-celery.service
+
+echo "Reloading systemd manager configuration..."
+sudo systemctl daemon-reload
+
+echo "Purging active Celery/Redis task queues..."
+if command -v redis-cli &> /dev/null; then
+    redis-cli FLUSHALL || true
+    echo "✓ Redis queue purged successfully."
+fi
+
 echo "----------------------------------------------------"
-
-# SAFETY CATCH
-read -p "Are you ABSOLUTELY sure you want to proceed? (Type 'YES' to confirm): " CONFIRM
-
-if [ "$CONFIRM" != "YES" ]; then
-    echo "Uninstallation aborted by user."
-    exit 0
-fi
-
-# Determine the actual user's home directory (handling if run via sudo)
-USER_NAME=$(logname || echo $SUDO_USER || whoami)
-PROJECT_ROOT=$(eval echo ~$USER_NAME)/redtape_radar
-
-echo ""
-echo "[1/4] Stopping RedTape Radar system daemons..."
-systemctl stop redtape-web || echo "-> Web service already stopped or missing."
-systemctl stop redtape-celery || echo "-> Celery service already stopped or missing."
-
-echo "[2/4] Disabling daemons and removing systemd files..."
-systemctl disable redtape-web || true
-systemctl disable redtape-celery || true
-rm -f /etc/systemd/system/redtape-web.service
-rm -f /etc/systemd/system/redtape-celery.service
-
-echo "[3/4] Reloading Linux systemd manager..."
-systemctl daemon-reload
-systemctl reset-failed
-
-echo "[4/4] Erasing application files, virtual environment, and database..."
-if [ -d "$PROJECT_ROOT" ]; then
-    rm -rf "$PROJECT_ROOT"
-    echo "-> Directory $PROJECT_ROOT fully wiped."
+read -p "Do you want to delete the local SQLite database logs/history? (y/N): " DELETE_DB
+if [[ "$DELETE_DB" =~ ^[Yy]$ ]]; then
+    rm -f "$PROJECT_ROOT/redtape_radar.db"
+    echo "✓ Database file removed."
 else
-    echo "-> Project directory not found. Skipping."
+    echo "✓ Database file preserved at $PROJECT_ROOT/redtape_radar.db"
+fi
+
+read -p "Do you want to delete the Python virtual environment? (y/N): " DELETE_VENV
+if [[ "$DELETE_VENV" =~ ^[Yy]$ ]]; then
+    rm -rf "$PROJECT_ROOT/venv"
+    echo "✓ Virtual environment directory removed."
 fi
 
 echo "===================================================="
-echo "✅ REDTAPE RADAR HAS BEEN COMPLETELY UNINSTALLED."
+echo "✅ UNINSTALL COMPLETE!"
 echo "===================================================="
-echo ""
-echo "Note: System packages like 'redis-server' and 'python3-venv'"
-echo "were left intact as they may be utilized by other OS functions."
-echo "If you wish to remove Redis entirely, you can run:"
-echo "  sudo apt-get remove --purge redis-server -y"
+echo "The application services and schedulers have been removed."
+echo "Note: Shared infrastructure (Redis-Server and Ollama) were left intact."
 echo "===================================================="
