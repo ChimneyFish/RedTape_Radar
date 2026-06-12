@@ -2,17 +2,33 @@
 {% block content %}
 <h1>Dashboard</h1>
 <p>Welcome, {{ user.name }}</p>
-<table border="1" width="100%" style="background: white; border-collapse: collapse;">
+
+<h2>Published Alerts</h2>
+<table border="1" width="100%" style="background: white; border-collapse: collapse; margin-bottom: 40px;">
     <tr><th>Resource</th><th>Topic</th><th>Summary</th><th>Actionable Steps</th></tr>
     {% for alert in alerts %}
     <tr>
-        <td>{{ alert.resource }}</td>
-        <td>{{ alert.topic }}</td>
-        <td>{{ alert.summary }}</td>
-        <td>{{ alert.actionable_steps }}</td>
+        <td style="padding: 10px;">{{ alert.resource }}</td>
+        <td style="padding: 10px;">{{ alert.topic }}</td>
+        <td style="padding: 10px;">{{ alert.summary }}</td>
+        <td style="padding: 10px;">{{ alert.actionable_steps }}</td>
     </tr>
     {% else %}
-    <tr><td colspan="4">No alerts published yet.</td></tr>
+    <tr><td colspan="4" style="padding: 10px; text-align: center;">No alerts published yet.</td></tr>
+    {% endfor %}
+</table>
+
+<h2>System Scan Logs</h2>
+<table border="1" width="100%" style="background: white; border-collapse: collapse; font-family: monospace; font-size: 0.9em;">
+    <tr style="background: #f0f0f0;"><th>Date & Time (UTC)</th><th>Target</th><th>Scan Result / Status</th></tr>
+    {% for log in logs %}
+    <tr>
+        <td style="padding: 8px;">{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td style="padding: 8px;">{{ log.target.resource }}</td>
+        <td style="padding: 8px; {% if 'Error' in log.status_message or 'Failed' in log.status_message %}color: red;{% endif %}">{{ log.status_message }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" style="padding: 10px; text-align: center;">No scans have been executed yet.</td></tr>
     {% endfor %}
 </table>
 {% endblock %}

@@ -4,7 +4,8 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 import uvicorn
-from .models import engine, Base, get_db, PublishedAlert, AlertDraft, MonitoredTarget, AppConfig, User
+import subprocess
+from .models import engine, Base, get_db, PublishedAlert, AlertDraft, MonitoredTarget, AppConfig, User, ScanLog
 from . import auth
 
 Base.metadata.create_all(bind=engine)
@@ -20,7 +21,8 @@ async def unauthorized_redirect(request: Request, exc: HTTPException):
 @app.get("/", response_class=HTMLResponse)
 async def view_dashboard(request: Request, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     alerts = db.query(PublishedAlert).order_by(PublishedAlert.published_at.desc()).limit(50).all()
-    return templates.TemplateResponse(request=request, name="dashboard.html", context={"user": current_user, "alerts": alerts})
+    logs = db.query(ScanLog).order_by(ScanLog.timestamp.desc()).limit(20).all() # Fetch latest logs
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={"user": current_user, "alerts": alerts, "logs": logs})
 
 @app.get("/triage", response_class=HTMLResponse)
 async def view_triage_inbox(request: Request, db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
@@ -34,16 +36,14 @@ async def view_settings(request: Request, db: Session = Depends(get_db), admin_u
     configs = db.query(AppConfig).all()
     settings_dict = {cfg.key: cfg.value for cfg in configs}
     defaults = {
-        "confluence_url": "", "confluence_email": "", "confluence_api_token": "",
-        "llm_provider": "local", "local_model_name": "llama3",
-        "openai_api_key": "", "gemini_api_key": "", "claude_api_key": ""
+        "llm_provider": "local", "local_model_name": "llama3", "openai_api_key": "", "gemini_api_key": "", "claude_api_key": "",
+        "enable_emails": "false", "smtp_server": "", "smtp_port": "587", "smtp_user": "", "smtp_pass": "", "alert_email": ""
     }
     current_settings = {**defaults, **settings_dict}
     return templates.TemplateResponse(request=request, name="settings.html", context={"user": admin_user, "settings": current_settings, "system_users": users, "targets": targets})
 
 @app.get("/local-login", response_class=HTMLResponse)
-async def view_local_login(request: Request):
-    return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": None})
+async def view_local_login(request: Request): return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": None})
 
 @app.post("/api/local-login")
 async def process_local_login(request: Request, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
@@ -64,8 +64,7 @@ async def logout():
 @app.post("/api/users/create")
 async def create_user(email: str = Form(...), name: str = Form(...), role: str = Form("read_only"), password: str = Form(...), db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
     if not db.query(User).filter(User.email == email).first():
-        new_user = User(email=email, name=name, role=role, hashed_password=auth.get_password_hash(password), is_local=True)
-        db.add(new_user)
+        db.add(User(email=email, name=name, role=role, hashed_password=auth.get_password_hash(password), is_local=True))
         db.commit()
     return RedirectResponse(url="/settings", status_code=303)
 
@@ -73,42 +72,49 @@ async def create_user(email: str = Form(...), name: str = Form(...), role: str =
 async def update_settings(request: Request, db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
     form_data = await request.form()
     for key, value in form_data.items():
+        if key in ["use_ntp", "manual_time", "timezone"]: continue # Skip OS time variables
         config_item = db.query(AppConfig).filter(AppConfig.key == key).first()
         if config_item: config_item.value = str(value)
-        else:
-            db.add(AppConfig(key=key, value=str(value), is_secret=("key" in key or "token" in key)))
+        else: db.add(AppConfig(key=key, value=str(value), is_secret=("key" in key or "token" in key or "pass" in key)))
     db.commit()
     return RedirectResponse(url="/settings?success=true", status_code=303)
 
-@app.post("/api/targets")
-async def add_monitored_target(
-    url: str = Form(...), resource: str = Form(...), mode: str = Form("auto_clean"), 
-    frequency: str = Form("weekly"), recursive: bool = Form(False),
-    db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)
+# NEW: OS Level Time Controller
+@app.post("/api/system/time")
+async def update_system_time(
+    use_ntp: bool = Form(False), manual_time: str = Form(""), timezone: str = Form("UTC"),
+    admin_user: User = Depends(auth.require_admin)
 ):
-    new_target = MonitoredTarget(url=url, resource=resource, extraction_mode=mode, scan_frequency=frequency, recursive=recursive)
-    db.add(new_target)
+    try:
+        subprocess.run(["timedatectl", "set-timezone", timezone], check=True)
+        if use_ntp:
+            subprocess.run(["timedatectl", "set-ntp", "true"], check=True)
+        else:
+            subprocess.run(["timedatectl", "set-ntp", "false"], check=True)
+            if manual_time: 
+                # Requires Format: "YYYY-MM-DD HH:MM:SS"
+                subprocess.run(["timedatectl", "set-time", manual_time], check=True)
+    except Exception as e:
+        print(f"Failed to set system time: {e}")
+    return RedirectResponse(url="/settings?success=true", status_code=303)
+
+@app.post("/api/targets")
+async def add_monitored_target(url: str = Form(...), resource: str = Form(...), mode: str = Form("auto_clean"), frequency: str = Form("weekly"), recursive: bool = Form(False), db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
+    db.add(MonitoredTarget(url=url, resource=resource, extraction_mode=mode, scan_frequency=frequency, recursive=recursive))
     db.commit()
     return RedirectResponse(url="/settings", status_code=303)
 
 @app.post("/api/targets/{target_id}/delete")
 async def delete_monitored_target(target_id: int, db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
     target = db.query(MonitoredTarget).filter(MonitoredTarget.id == target_id).first()
-    if target:
-        db.delete(target)
-        db.commit()
+    if target: db.delete(target); db.commit()
     return RedirectResponse(url="/settings", status_code=303)
 
 @app.post("/api/drafts/{draft_id}/approve")
 async def approve_ai_draft(draft_id: int, actionable_steps: str = Form(...), key_deadlines: str = Form(""), db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
     draft = db.query(AlertDraft).filter(AlertDraft.id == draft_id).first()
-    if not draft: raise HTTPException(status_code=404, detail="Draft not found")
-
-    published = PublishedAlert(resource=draft.target.resource, url=draft.target.url, topic=draft.topic, summary=draft.summary_raw, actionable_steps=actionable_steps, key_deadlines=key_deadlines)
-    db.add(published)
+    if not draft: raise HTTPException(status_code=404)
+    db.add(PublishedAlert(resource=draft.target.resource, url=draft.target.url, topic=draft.topic, summary=draft.summary_raw, actionable_steps=actionable_steps, key_deadlines=key_deadlines))
     draft.is_reviewed = True
     db.commit()
     return RedirectResponse(url="/triage", status_code=303)
-
-if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

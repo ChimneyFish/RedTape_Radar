@@ -4,6 +4,34 @@
 
 <!-- Target Management Section -->
 <div class="card">
+    <h2>System Users</h2>
+    <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
+        <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr>
+        {% for u in system_users %}
+        <tr>
+            <td>{{ u.name }}</td>
+            <td>{{ u.email }}</td>
+            <td>{{ u.role | upper }}</td>
+            <td>{% if u.is_active %}Active{% else %}Inactive{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h3>Provision New Account</h3>
+    <form action="/api/users/create" method="post" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
+        <input type="text" name="name" placeholder="Full Name" required style="margin-bottom: 10px; width: 45%;">&nbsp;
+        <input type="email" name="email" placeholder="email@domain.com" required style="margin-bottom: 10px; width: 45%;"><br>
+        <input type="password" name="password" placeholder="Password" required style="margin-bottom: 10px; width: 45%;">&nbsp;
+        
+        <label>System Role:</label>
+        <select name="role">
+            <option value="read_only">Read-Only User</option>
+            <option value="admin">System Administrator</option>
+        </select>
+        <br><br>
+        <button type="submit" style="background-color: #28a745;">Create User Account</button>
+    </form>
+</div>
     <h2>Monitored Websites</h2>
     <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
         <tr><th>Resource</th><th>URL</th><th>Config</th><th>Last Scanned</th><th>Action</th></tr>
@@ -73,7 +101,44 @@
         <label>Google Gemini API Key:</label><br>
         <input type="password" name="gemini_api_key" value="{{ settings.gemini_api_key }}" size="50">
     </div>
+<div class="card">
+        <h2>Email Alert Settings</h2>
+        <label>
+            <input type="checkbox" name="enable_emails" value="true" {% if settings.enable_emails == 'true' %}checked{% endif %}>
+            Enable Email Notifications for New Drafts
+        </label><br><br>
+        <label>SMTP Server & Port:</label><br>
+        <input type="text" name="smtp_server" value="{{ settings.smtp_server }}" placeholder="smtp.gmail.com">&nbsp;
+        <input type="text" name="smtp_port" value="{{ settings.smtp_port }}" size="5" placeholder="587"><br><br>
+        <label>SMTP Username & Password:</label><br>
+        <input type="text" name="smtp_user" value="{{ settings.smtp_user }}" placeholder="youremail@domain.com">&nbsp;
+        <input type="password" name="smtp_pass" value="{{ settings.smtp_pass }}" placeholder="App Password"><br><br>
+        <label>Send Alerts To:</label><br>
+        <input type="email" name="alert_email" value="{{ settings.alert_email }}" size="50" placeholder="admin_team@domain.com">
+    </div>
+    <button type="submit" style="background-color: #28a745; width: 100%; font-size: 1.1em;">Save System Configuration</button>
+</form>
+<hr style="margin: 40px 0;">
+<form action="/api/system/time" method="post">
+    <div class="card" style="border-left: 5px solid #ffc107;">
+        <h2>System Time Configuration (OS Level)</h2>
+        <p style="color: #666;">Changes here directly affect the Linux server time via <code>timedatectl</code>, which dictates the Celery scheduler.</p>
+        
+        <label>
+            <input type="checkbox" name="use_ntp" value="true" checked>
+            Use Automatic Network Time (NTP)
+        </label><br><br>
+        
+        <label>Manual Date/Time Override (Format: YYYY-MM-DD HH:MM:SS):</label><br>
+        <input type="text" name="manual_time" placeholder="2026-10-15 14:30:00" size="30">
+        <i>(Leave blank if using NTP)</i><br><br>
 
+        <label>Server Timezone:</label><br>
+        <input type="text" name="timezone" value="UTC" placeholder="America/Los_Angeles" size="30"><br><br>
+        
+        <button type="submit" style="background-color: #ffc107; color: #333; font-weight: bold;">Sync OS Time</button>
+    </div>
+</form>
     <!-- Integration Settings -->
     <div class="card">
         <h2>Confluence Integration</h2>

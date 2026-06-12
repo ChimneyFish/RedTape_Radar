@@ -37,6 +37,15 @@ class MonitoredTarget(Base):
     last_hash = Column(String(64), nullable=True)
     is_active = Column(Boolean, default=True)
     drafts = relationship("AlertDraft", back_populates="target", cascade="all, delete-orphan")
+    logs = relationship("ScanLog", back_populates="target", cascade="all, delete-orphan")
+
+class ScanLog(Base):
+    __tablename__ = "scan_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    target_id = Column(Integer, ForeignKey("monitored_targets.id"), nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    status_message = Column(String(255), nullable=False)
+    target = relationship("MonitoredTarget", back_populates="logs")
 
 class AlertDraft(Base):
     __tablename__ = "alert_drafts"
@@ -59,7 +68,6 @@ class PublishedAlert(Base):
     actionable_steps = Column(Text, nullable=False)
     key_deadlines = Column(String(100), nullable=True)
     published_at = Column(DateTime, default=datetime.utcnow)
-    confluence_page_id = Column(String(100), nullable=True)
 
 class AppConfig(Base):
     __tablename__ = "app_config"
