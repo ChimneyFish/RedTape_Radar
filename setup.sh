@@ -10,7 +10,7 @@ read -p "Enter Admin Email (e.g., admin@domain.com): " ADMIN_EMAIL
 read -s -p "Enter Admin Password: " ADMIN_PASSWORD
 echo ""
 
-PROJECT_ROOT="$HOME/redtape_radar"
+PROJECT_ROOT="$HOME/RedTape_Radar"
 BIND_IP=$(hostname -I | awk '{print $1}')
 
 echo "----------------------------------------------------"
