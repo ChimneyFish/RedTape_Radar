@@ -158,17 +158,23 @@ def scan_all_targets():
                     try:
                         ai_data = call_llm(prompt, config)
                         if ai_data and ai_data.get('Topic') != "NONE":
+                            
+                            # SAFETY CHECK: If AI returns a list of dates, join them into a string for the DB
+                            raw_dates = ai_data.get('Explicit_Dates', '')
+                            safe_dates = ", ".join(str(d) for d in raw_dates) if isinstance(raw_dates, list) else str(raw_dates)
+
                             db.add(AlertDraft(
                                 target_id=target.id, 
-                                topic=ai_data.get('Topic', 'Regulatory Shift Detected'), 
-                                summary_raw=ai_data.get('Summary', 'No comparison summary provided.'), 
-                                detected_dates=ai_data.get('Explicit_Dates', '')
+                                topic=str(ai_data.get('Topic', 'Regulatory Shift Detected')), 
+                                summary_raw=str(ai_data.get('Summary', 'No comparison summary provided.')), 
+                                detected_dates=safe_dates
                             ))
                             db.add(ScanLog(target_id=target.id, status_message=f"Diff Engine Triggered: {ai_data.get('Topic')} sent to Triage."))
                             send_alert_email(config, target.resource, ai_data.get('Topic'))
                         else:
                             db.add(ScanLog(target_id=target.id, status_message="Text changed, but local AI found no regulatory significance in the diff."))
                     except Exception as e:
+                        db.rollback() # <--- Clear the tainted database session
                         db.add(ScanLog(target_id=target.id, status_message=f"LLM Diff Error: {str(e)[:240]}"))
                 
                 # 4. Commit current state to history database columns
@@ -178,6 +184,7 @@ def scan_all_targets():
                 db.commit()
                 
             except Exception as e:
+                db.rollback() # <--- Clear the tainted database session
                 db.add(ScanLog(target_id=target.id, status_message=f"Fatal Scan Error: {str(e)[:200]}"))
                 db.commit()
     finally:
