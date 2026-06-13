@@ -35,6 +35,7 @@ class MonitoredTarget(Base):
     recursive = Column(Boolean, default=False)
     last_scanned = Column(DateTime, nullable=True)
     last_hash = Column(String(64), nullable=True)
+    last_text = Column(Text, nullable=True)  # <-- NEW: Stores the text snapshot for AI diff comparison
     is_active = Column(Boolean, default=True)
     drafts = relationship("AlertDraft", back_populates="target", cascade="all, delete-orphan")
     logs = relationship("ScanLog", back_populates="target", cascade="all, delete-orphan")

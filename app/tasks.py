@@ -119,6 +119,7 @@ def scan_all_targets():
                 continue 
                 
             try:
+                # 1. Scrape the live website
                 current_text = scrape_with_depth(target.url, target.extraction_mode, target.recursive)
                 if not current_text:
                     db.add(ScanLog(target_id=target.id, status_message="Failed to extract text from URL."))
@@ -127,36 +128,57 @@ def scan_all_targets():
                 
                 current_hash = hashlib.sha256(current_text.encode('utf-8')).hexdigest()
                 
+                # 2. Check if anything changed physically
                 if target.last_hash == current_hash:
                     db.add(ScanLog(target_id=target.id, status_message="No Changes Detected."))
                 else:
-                    prompt = f"""You are a regulatory research assistant. Analyze the text from {target.url}.
-                    Extract proposed regulations, changes, or compliance dates. If there are NO regulatory changes, set Topic to "NONE".
-                    REQUIRED JSON SCHEMA:
+                    # If this is the very first scan, initialize old_text to match current_text
+                    old_text = target.last_text if target.last_text else "No historical text available (First Scan)."
+                    
+                    # 3. Construct the Intelligent Diff Prompt
+                    prompt = f"""You are a regulatory compliance auditor comparing two versions of a monitored text from {target.url}.
+                    Your goal is to identify explicit changes in mandates, rules, requirements, deadlines, or compliance standards.
+                    
+                    Do NOT flag formatting changes, layout shifts, or non-regulatory modifications.
+                    If no regulatory items were added, removed, or modified, set Topic to "NONE".
+                    
+                    --- PASTORAL/HISTORICAL TEXT VERSION ---
+                    {old_text[:3500]}
+                    
+                    --- NEW/CURRENT TEXT VERSION ---
+                    {current_text[:3500]}
+                    
+                    REQUIRED JSON RESPONSE SCHEMA:
                     {{
-                        "Topic": "Extract the core topic",
-                        "Summary": "Factual summary of exactly what was added, removed, or changed.",
-                        "Explicit_Dates": "Explicit dates (Leave blank if none)."
-                    }}
-                    TEXT: {current_text}"""
+                        "Topic": "Name of the modified rule/mandate (or 'NONE')",
+                        "Summary": "Explain precisely what changed. (e.g., 'High-visibility vest requirement added for warehouse personnel. Minimum penalty for non-compliance raised.')",
+                        "Explicit_Dates": "Any new or modified deadlines stated in the text."
+                    }}"""
                     
                     try:
                         ai_data = call_llm(prompt, config)
                         if ai_data and ai_data.get('Topic') != "NONE":
-                            db.add(AlertDraft(target_id=target.id, topic=ai_data.get('Topic', 'Pending Review'), summary_raw=ai_data.get('Summary', 'No summary generated.'), detected_dates=ai_data.get('Explicit_Dates', '')))
-                            db.add(ScanLog(target_id=target.id, status_message="Change Detected! Sent to Triage."))
+                            db.add(AlertDraft(
+                                target_id=target.id, 
+                                topic=ai_data.get('Topic', 'Regulatory Shift Detected'), 
+                                summary_raw=ai_data.get('Summary', 'No comparison summary provided.'), 
+                                detected_dates=ai_data.get('Explicit_Dates', '')
+                            ))
+                            db.add(ScanLog(target_id=target.id, status_message=f"Diff Engine Triggered: {ai_data.get('Topic')} sent to Triage."))
                             send_alert_email(config, target.resource, ai_data.get('Topic'))
                         else:
-                            db.add(ScanLog(target_id=target.id, status_message="Hash changed, but AI found no regulatory updates."))
+                            db.add(ScanLog(target_id=target.id, status_message="Text changed, but local AI found no regulatory significance in the diff."))
                     except Exception as e:
-                        db.add(ScanLog(target_id=target.id, status_message=str(e)[:250])) # Log API failure
+                        db.add(ScanLog(target_id=target.id, status_message=f"LLM Diff Error: {str(e)[:240]}"))
                 
+                # 4. Commit current state to history database columns
                 target.last_hash = current_hash
+                target.last_text = current_text
                 target.last_scanned = now 
                 db.commit()
                 
             except Exception as e:
-                db.add(ScanLog(target_id=target.id, status_message=f"Fatal Error: {str(e)[:200]}"))
+                db.add(ScanLog(target_id=target.id, status_message=f"Fatal Scan Error: {str(e)[:200]}"))
                 db.commit()
     finally:
         db.close()
