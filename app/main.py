@@ -7,6 +7,7 @@ import uvicorn
 import subprocess
 from .models import engine, Base, get_db, PublishedAlert, AlertDraft, MonitoredTarget, AppConfig, User, ScanLog
 from . import auth
+from .tasks import scan_single_target
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="RedTape Radar")
@@ -50,10 +51,38 @@ async def process_local_login(request: Request, email: str = Form(...), password
     user = db.query(User).filter(User.email == email).first()
     if not user or not auth.verify_password(password, user.hashed_password):
         return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": "Invalid credentials"})
+    
+    # Intercept for forced password reset
+    if user.must_change_password:
+        return templates.TemplateResponse(request=request, name="reset_password.html", context={"email": user.email})
+        
     token = auth.create_local_token(user.email)
     response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(key="local_session", value=token, httponly=True, max_age=86400)
     return response
+
+@app.post("/api/reset-password")
+async def execute_password_reset(request: Request, email: str = Form(...), old_password: str = Form(...), new_password: str = Form(...), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not auth.verify_password(old_password, user.hashed_password):
+        return templates.TemplateResponse(request=request, name="reset_password.html", context={"email": email, "error": "Old password incorrect."})
+    
+    user.hashed_password = auth.get_password_hash(new_password)
+    user.must_change_password = False
+    db.commit()
+    
+    token = auth.create_local_token(user.email)
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(key="local_session", value=token, httponly=True, max_age=86400)
+    return response
+
+@app.post("/api/users/{target_id}/force-reset")
+async def force_user_reset(target_id: int, db: Session = Depends(get_db), admin: User = Depends(auth.require_admin)):
+    target = db.query(User).filter(User.id == target_id).first()
+    if target:
+        target.must_change_password = True
+        db.commit()
+    return RedirectResponse(url="/settings", status_code=303)
 
 @app.get("/logout")
 async def logout():
@@ -99,13 +128,15 @@ async def update_system_time(
     return RedirectResponse(url="/settings?success=true", status_code=303)
 
 @app.post("/api/targets")
-async def add_monitored_target(url: str = Form(...), resource: str = Form(...), mode: str = Form("auto_clean"), frequency: str = Form("weekly"), recursive: bool = Form(False), db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
-    db.add(MonitoredTarget(url=url, resource=resource, extraction_mode=mode, scan_frequency=frequency, recursive=recursive))
+async def add_monitored_target(url: str = Form(...), resource: str = Form(...), mode: str = Form("auto_clean"), frequency: str = Form("weekly"), recursive: bool = Form(False), db: Session = Depends(get_db), editor_user: User = Depends(auth.require_editor)):
+    new_target = MonitoredTarget(url=url, resource=resource, extraction_mode=mode, scan_frequency=frequency, recursive=recursive)
+    db.add(new_target)
     db.commit()
+    scan_single_target.delay(new_target.id) # <--- Triggers the Instant Baseline!
     return RedirectResponse(url="/settings", status_code=303)
 
 @app.post("/api/targets/{target_id}/delete")
-async def delete_monitored_target(target_id: int, db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
+async def delete_monitored_target(target_id: int, db: Session = Depends(get_db), editor_user: User = Depends(auth.require_editor)):
     target = db.query(MonitoredTarget).filter(MonitoredTarget.id == target_id).first()
     if target: db.delete(target); db.commit()
     return RedirectResponse(url="/settings", status_code=303)

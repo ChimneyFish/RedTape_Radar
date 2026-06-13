@@ -2,7 +2,7 @@
 {% block content %}
 <h1>System Configuration</h1>
 
-<!-- Target Management Section -->
+{% if user.role == 'admin' %}
 <div class="card">
     <h2>System Users</h2>
     <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
@@ -12,10 +12,17 @@
             <td>{{ u.name }}</td>
             <td>{{ u.email }}</td>
             <td>{{ u.role | upper }}</td>
-            <td>{% if u.is_active %}Active{% else %}Inactive{% endif %}</td>
+            <td>
+                {% if not u.must_change_password %}
+                <form action="/api/users/{{ u.id }}/force-reset" method="post" style="display:inline;">
+                    <button type="submit" style="background-color: #ffc107; color: black; padding: 2px 8px; font-size: 0.8em;">Force Reset</button>
+                </form>
+                {% else %}
+                <span style="color: red;">Reset Pending</span>
+                {% endif %}
+            </td>
         </tr>
-        {% endfor %}
-    </table>
+        {% endfor %} </table>
 
     <h3>Provision New Account</h3>
     <form action="/api/users/create" method="post" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
@@ -26,12 +33,17 @@
         <label>System Role:</label>
         <select name="role">
             <option value="read_only">Read-Only User</option>
+            <option value="editor">Target Editor (URLs Only)</option>
             <option value="admin">System Administrator</option>
         </select>
         <br><br>
         <button type="submit" style="background-color: #28a745;">Create User Account</button>
     </form>
 </div>
+{% endif %}
+
+
+<div class="card">
     <h2>Monitored Websites</h2>
     <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
         <tr><th>Resource</th><th>URL</th><th>Config</th><th>Last Scanned</th><th>Action</th></tr>
@@ -63,11 +75,11 @@
         
         <label>Scan Frequency:</label>
         <select name="frequency" style="margin-right: 20px;">
+            <option value="5_min">Every 5 Minutes (Testing)</option>
             <option value="hourly">Hourly</option>
             <option value="daily">Daily</option>
             <option value="weekly" selected>Weekly</option>
         </select>
-
         <label>Scraping Mode:</label>
         <select name="mode" style="margin-right: 20px;">
             <option value="auto_clean">Body Only (Strip Headers/Nav)</option>
@@ -79,8 +91,11 @@
     </form>
 </div>
 
+
+{% if user.role == 'admin' %}
+
 <form action="/api/settings/update" method="post">
-    <!-- LLM Provider Section -->
+    
     <div class="card">
         <h2>AI Engine Configuration</h2>
         <label>Active LLM Provider:</label><br>
@@ -101,7 +116,8 @@
         <label>Google Gemini API Key:</label><br>
         <input type="password" name="gemini_api_key" value="{{ settings.gemini_api_key }}" size="50">
     </div>
-<div class="card">
+
+    <div class="card">
         <h2>Email Alert Settings</h2>
         <label>
             <input type="checkbox" name="enable_emails" value="true" {% if settings.enable_emails == 'true' %}checked{% endif %}>
@@ -116,9 +132,19 @@
         <label>Send Alerts To:</label><br>
         <input type="email" name="alert_email" value="{{ settings.alert_email }}" size="50" placeholder="admin_team@domain.com">
     </div>
-    <button type="submit" style="background-color: #28a745; width: 100%; font-size: 1.1em;">Save System Configuration</button>
+
+    <div class="card">
+        <h2>Confluence Integration</h2>
+        <label>Workspace URL:</label><br><input type="text" name="confluence_url" value="{{ settings.confluence_url }}" size="50"><br><br>
+        <label>Service Email:</label><br><input type="text" name="confluence_email" value="{{ settings.confluence_email }}" size="50"><br><br>
+        <label>API Token:</label><br><input type="password" name="confluence_api_token" value="{{ settings.confluence_api_token }}" size="50">
+    </div>
+    
+    <button type="submit" style="background-color: #28a745; width: 100%; font-size: 1.1em; padding: 10px;">Save System Configuration</button>
 </form>
+
 <hr style="margin: 40px 0;">
+
 <form action="/api/system/time" method="post">
     <div class="card" style="border-left: 5px solid #ffc107;">
         <h2>System Time Configuration (OS Level)</h2>
@@ -139,13 +165,6 @@
         <button type="submit" style="background-color: #ffc107; color: #333; font-weight: bold;">Sync OS Time</button>
     </div>
 </form>
-    <!-- Integration Settings -->
-    <div class="card">
-        <h2>Confluence Integration</h2>
-        <label>Workspace URL:</label><br><input type="text" name="confluence_url" value="{{ settings.confluence_url }}" size="50"><br><br>
-        <label>Service Email:</label><br><input type="text" name="confluence_email" value="{{ settings.confluence_email }}" size="50"><br><br>
-        <label>API Token:</label><br><input type="password" name="confluence_api_token" value="{{ settings.confluence_api_token }}" size="50">
-    </div>
-    <button type="submit" style="background-color: #28a745;">Save System Configuration</button>
-</form>
+
+{% endif %}
 {% endblock %}

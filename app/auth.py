@@ -37,3 +37,8 @@ async def require_admin(current_user: User = Depends(get_current_user)):
     if current_user.role != 'admin': 
         raise HTTPException(status_code=403, detail="Admin privileges required.")
     return current_user
+
+async def require_editor(current_user=Depends(get_current_user)):
+    if current_user.role not in ["admin", "editor"]:
+        raise HTTPException(status_code=403, detail="Not authorized. Editor or Admin required.")
+    return current_user

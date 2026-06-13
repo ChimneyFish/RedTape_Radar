@@ -13,18 +13,20 @@ def get_db():
     try: yield db
     finally: db.close()
 
+# Inside app/models.py, update the User class:
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
     name = Column(String(255), nullable=True)
-    role = Column(String(50), default="read_only")
+    role = Column(String(50), default="read_only") # admin, editor, read_only
     is_active = Column(Boolean, default=True)
     is_local = Column(Boolean, default=False)
     hashed_password = Column(String(255), nullable=True)
+    must_change_password = Column(Boolean, default=False) # <--- NEW FLAG
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
-
+    
 class MonitoredTarget(Base):
     __tablename__ = "monitored_targets"
     id = Column(Integer, primary_key=True, index=True)
