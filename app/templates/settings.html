@@ -165,6 +165,19 @@
         <button type="submit" style="background-color: #ffc107; color: #333; font-weight: bold;">Sync OS Time</button>
     </div>
 </form>
-
+<div class="card" style="border-left: 5px solid #17a2b8;">
+    <h2>Backup & Restore</h2>
+    <p style="color: #666;">Export your targets and API settings to a JSON file, or restore them from a previous backup to avoid reconfiguring from scratch after a database wipe.</p>
+    
+    <form action="/api/settings/export" method="get" style="margin-bottom: 20px;">
+        <button type="submit" style="background-color: #17a2b8;">Export Configuration (Download)</button>
+    </form>
+    
+    <form action="/api/settings/import" method="post" enctype="multipart/form-data" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
+        <label>Restore from Backup (.json):</label><br><br>
+        <input type="file" name="backup_file" accept=".json" required><br><br>
+        <button type="submit" style="background-color: #28a745;">Import & Apply</button>
+    </form>
+</div>
 {% endif %}
 {% endblock %}

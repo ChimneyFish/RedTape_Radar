@@ -8,6 +8,9 @@ import subprocess
 from .models import engine, Base, get_db, PublishedAlert, AlertDraft, MonitoredTarget, AppConfig, User, ScanLog
 from . import auth
 from .tasks import scan_single_target
+import json
+from fastapi import FastAPI, Request, Depends, HTTPException, Form, UploadFile, File
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="RedTape Radar")
@@ -149,3 +152,57 @@ async def approve_ai_draft(draft_id: int, actionable_steps: str = Form(...), key
     draft.is_reviewed = True
     db.commit()
     return RedirectResponse(url="/triage", status_code=303)
+
+@app.get("/api/settings/export")
+async def export_settings(db: Session = Depends(get_db), admin: User = Depends(auth.require_admin)):
+    configs = db.query(AppConfig).all()
+    targets = db.query(MonitoredTarget).all()
+    
+    export_data = {
+        "config": {c.key: c.value for c in configs},
+        "targets": [
+            {
+                "resource": t.resource,
+                "url": t.url,
+                "extraction_mode": t.extraction_mode,
+                "scan_frequency": t.scan_frequency,
+                "recursive": t.recursive
+            } for t in targets
+        ]
+    }
+    
+    return Response(
+        content=json.dumps(export_data, indent=4),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=redtape_backup.json"}
+    )
+
+@app.post("/api/settings/import")
+async def import_settings(backup_file: UploadFile = File(...), db: Session = Depends(get_db), admin: User = Depends(auth.require_admin)):
+    content = await backup_file.read()
+    try:
+        data = json.loads(content)
+        
+        # 1. Restore API Keys and Configurations
+        if "config" in data:
+            for key, value in data["config"].items():
+                cfg = db.query(AppConfig).filter(AppConfig.key == key).first()
+                if cfg: cfg.value = value
+                else: db.add(AppConfig(key=key, value=value, is_secret=("key" in key or "token" in key or "pass" in key)))
+        
+        # 2. Restore Monitored URLs (Ignoring duplicates)
+        if "targets" in data:
+            for t in data["targets"]:
+                existing = db.query(MonitoredTarget).filter(MonitoredTarget.url == t.get("url")).first()
+                if not existing:
+                    db.add(MonitoredTarget(
+                        resource=t.get("resource"), url=t.get("url"),
+                        extraction_mode=t.get("extraction_mode", "auto_clean"),
+                        scan_frequency=t.get("scan_frequency", "weekly"),
+                        recursive=t.get("recursive", False)
+                    ))
+        db.commit()
+    except Exception as e:
+        print(f"Import failed: {e}")
+        
+    return RedirectResponse(url="/settings?success=true", status_code=303)
