@@ -41,7 +41,8 @@ async def view_settings(request: Request, db: Session = Depends(get_db), admin_u
     settings_dict = {cfg.key: cfg.value for cfg in configs}
     defaults = {
         "llm_provider": "local", "local_model_name": "llama3", "openai_api_key": "", "gemini_api_key": "", "claude_api_key": "",
-        "enable_emails": "false", "smtp_server": "", "smtp_port": "587", "smtp_user": "", "smtp_pass": "", "alert_email": ""
+        "enable_emails": "false", "smtp_server": "", "smtp_port": "587", "smtp_user": "", "smtp_pass": "", "alert_email": "",
+        "use_ntp": "true", "timezone": "UTC"
     }
     current_settings = {**defaults, **settings_dict}
     return templates.TemplateResponse(request=request, name="settings.html", context={"user": admin_user, "settings": current_settings, "system_users": users, "targets": targets})
@@ -111,23 +112,33 @@ async def update_settings(request: Request, db: Session = Depends(get_db), admin
     db.commit()
     return RedirectResponse(url="/settings?success=true", status_code=303)
 
-# NEW: OS Level Time Controller
+# OS Level Time Controller
 @app.post("/api/system/time")
 async def update_system_time(
-    use_ntp: bool = Form(False), manual_time: str = Form(""), timezone: str = Form("UTC"),
+    use_ntp: str = Form("false"), manual_time: str = Form(""), timezone: str = Form("UTC"),
+    db: Session = Depends(get_db),
     admin_user: User = Depends(auth.require_admin)
 ):
+    ntp_enabled = use_ntp == "true"
     try:
         subprocess.run(["timedatectl", "set-timezone", timezone], check=True)
-        if use_ntp:
+        if ntp_enabled:
             subprocess.run(["timedatectl", "set-ntp", "true"], check=True)
         else:
             subprocess.run(["timedatectl", "set-ntp", "false"], check=True)
-            if manual_time: 
-                # Requires Format: "YYYY-MM-DD HH:MM:SS"
+            if manual_time:
                 subprocess.run(["timedatectl", "set-time", manual_time], check=True)
     except Exception as e:
         print(f"Failed to set system time: {e}")
+
+    # Persist NTP settings so the page reflects current state
+    for key, value in [("use_ntp", "true" if ntp_enabled else "false"), ("timezone", timezone)]:
+        cfg = db.query(AppConfig).filter(AppConfig.key == key).first()
+        if cfg:
+            cfg.value = value
+        else:
+            db.add(AppConfig(key=key, value=value, is_secret=False))
+    db.commit()
     return RedirectResponse(url="/settings?success=true", status_code=303)
 
 @app.post("/api/targets")
