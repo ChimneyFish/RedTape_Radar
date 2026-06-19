@@ -81,7 +81,7 @@ def call_llm(prompt: str, config: dict) -> dict:
 def send_alert_email(config: dict, target_name: str, topic: str):
     if config.get("enable_emails") != "true": return
     try:
-        msg = MIMEText(f"RedTape Radar detected a potential regulatory change on {target_name}.\nTopic: {topic}\nLog in to Triage Inbox to review.")
+        msg = MIMEText(f"RedTape Radar detected a change on {target_name}.\nTopic: {topic}\nLog in to Triage Inbox to review.")
         msg['Subject'] = f"[RedTape Alert] Change Detected: {target_name}"
         msg['From'] = config.get("smtp_user")
         msg['To'] = config.get("alert_email")
@@ -107,26 +107,27 @@ def _process_target(target, db, config, now):
             db.add(ScanLog(target_id=target.id, status_message="No Changes Detected."))
         else:
             old_text = target.last_text if target.last_text else "No historical text available (First Scan)."
-            prompt = f"""You are a regulatory compliance auditor comparing two versions of a monitored text from {target.url}.
-            Identify explicit changes in mandates, rules, requirements, deadlines, or compliance standards.
-            Do NOT flag formatting changes or non-regulatory modifications. If none, set Topic to "NONE".
+            prompt = f"""You are an analyst comparing two versions of a webpage from {target.url}.
+            Identify and summarize ALL meaningful content changes including text updates, new or removed information, policy changes, regulatory updates, pricing changes, personnel updates, or any other substantive modifications.
+            Ignore purely cosmetic differences such as whitespace adjustments, punctuation, or HTML formatting with no semantic impact.
+            If there are no meaningful content differences, set Topic to "NONE".
             --- OLD TEXT ---
             {old_text[:3500]}
             --- NEW TEXT ---
             {current_text[:3500]}
             REQUIRED JSON RESPONSE SCHEMA:
-            {{ "Topic": "Name of the modified rule (or 'NONE')", "Summary": "Explain precisely what changed.", "Explicit_Dates": "Any deadlines." }}"""
-            
+            {{ "Topic": "Short title of the change (or 'NONE')", "Summary": "Explain precisely what changed.", "Explicit_Dates": "Any dates or deadlines mentioned." }}"""
+
             try:
                 ai_data = call_llm(prompt, config)
                 if ai_data and ai_data.get('Topic') != "NONE":
                     raw_dates = ai_data.get('Explicit_Dates', '')
                     safe_dates = ", ".join(str(d) for d in raw_dates) if isinstance(raw_dates, list) else str(raw_dates)
                     db.add(AlertDraft(target_id=target.id, topic=str(ai_data.get('Topic')), summary_raw=str(ai_data.get('Summary')), detected_dates=safe_dates))
-                    db.add(ScanLog(target_id=target.id, status_message=f"Diff Triggered: {ai_data.get('Topic')} sent to Triage."))
+                    db.add(ScanLog(target_id=target.id, status_message=f"Change Detected: {ai_data.get('Topic')} sent to Triage."))
                     send_alert_email(config, target.resource, ai_data.get('Topic'))
                 else:
-                    db.add(ScanLog(target_id=target.id, status_message="Text changed, but AI found no regulatory significance."))
+                    db.add(ScanLog(target_id=target.id, status_message="Text changed, but AI found no meaningful content differences."))
             except Exception as e:
                 db.rollback()
                 db.add(ScanLog(target_id=target.id, status_message=f"LLM Diff Error: {str(e)[:240]}"))

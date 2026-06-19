@@ -151,16 +151,16 @@
         <p style="color: #666;">Changes here directly affect the Linux server time via <code>timedatectl</code>, which dictates the Celery scheduler.</p>
         
         <label>
-            <input type="checkbox" name="use_ntp" value="true" checked>
+            <input type="checkbox" name="use_ntp" value="true" {% if settings.use_ntp == 'true' %}checked{% endif %}>
             Use Automatic Network Time (NTP)
         </label><br><br>
-        
+
         <label>Manual Date/Time Override (Format: YYYY-MM-DD HH:MM:SS):</label><br>
         <input type="text" name="manual_time" placeholder="2026-10-15 14:30:00" size="30">
         <i>(Leave blank if using NTP)</i><br><br>
 
         <label>Server Timezone:</label><br>
-        <input type="text" name="timezone" value="UTC" placeholder="America/Los_Angeles" size="30"><br><br>
+        <input type="text" name="timezone" value="{{ settings.timezone }}" placeholder="America/Los_Angeles" size="30"><br><br>
         
         <button type="submit" style="background-color: #ffc107; color: #333; font-weight: bold;">Sync OS Time</button>
     </div>
