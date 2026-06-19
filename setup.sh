@@ -15,7 +15,7 @@ BIND_IP=$(hostname -I | awk '{print $1}')
 echo "----------------------------------------------------"
 echo "Installing System Dependencies..."
 sudo apt-get update -y
-sudo apt-get install -y python3-venv python3-pip redis-server curl
+sudo apt-get install -y python3-venv python3-pip redis-server curl openssl
 
 echo "Installing Ollama AI Engine..."
 if ! command -v ollama &> /dev/null; then
@@ -59,6 +59,20 @@ EOF
 python3 create_admin.py "$ADMIN_EMAIL" "$ADMIN_PASSWORD"
 rm "$PROJECT_ROOT/create_admin.py"
 
+echo "Generating TLS Certificate..."
+mkdir -p "$PROJECT_ROOT/certs"
+if [ ! -f "$PROJECT_ROOT/certs/server.crt" ]; then
+    openssl req -x509 -newkey rsa:4096 \
+        -keyout "$PROJECT_ROOT/certs/server.key" \
+        -out "$PROJECT_ROOT/certs/server.crt" \
+        -days 365 -nodes \
+        -subj "/C=US/ST=Local/L=Local/O=RedTape Radar/CN=$BIND_IP"
+    chmod 600 "$PROJECT_ROOT/certs/server.key"
+    echo "Self-signed certificate generated (valid 365 days). Replace via Settings > TLS Certificate."
+else
+    echo "Existing certificate found. Skipping generation."
+fi
+
 echo "Configuring Systemd Daemons..."
 
 sudo bash -c "cat << EOF > /etc/systemd/system/redtape-web.service
@@ -70,7 +84,7 @@ After=network.target
 User=root
 WorkingDirectory=$PROJECT_ROOT
 Environment=\"PATH=$PROJECT_ROOT/venv/bin\"
-ExecStart=$PROJECT_ROOT/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+ExecStart=$PROJECT_ROOT/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-keyfile $PROJECT_ROOT/certs/server.key --ssl-certfile $PROJECT_ROOT/certs/server.crt
 Restart=always
 
 [Install]
@@ -101,6 +115,10 @@ sudo systemctl restart redtape-web redtape-celery redis-server
 echo "===================================================="
 echo "✅ INFRASTRUCTURE READY! REDTAPE RADAR IS LIVE!"
 echo "===================================================="
-echo "Access point:   http://$BIND_IP:8000/local-login"
+echo "Access point:   https://$BIND_IP:8443/local-login"
 echo "Login with:     $ADMIN_EMAIL"
+echo ""
+echo "NOTE: Your browser will show a certificate warning for the"
+echo "self-signed cert. Accept the exception to proceed, or upload"
+echo "a CA-signed cert via Settings > TLS Certificate."
 echo "===================================================="

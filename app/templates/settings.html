@@ -2,6 +2,15 @@
 {% block content %}
 <h1>System Configuration</h1>
 
+{% set _success = request.query_params.get('success') %}
+{% set _error   = request.query_params.get('error') %}
+{% if _success %}
+<div class="flash-success">{% if _success == 'true' %}Settings saved successfully.{% else %}{{ _success }}{% endif %}</div>
+{% endif %}
+{% if _error %}
+<div class="flash-error">{{ _error }}</div>
+{% endif %}
+
 {% if user.role == 'admin' %}
 <div class="card">
     <h2>System Users</h2>
@@ -22,14 +31,14 @@
                 {% endif %}
             </td>
         </tr>
-        {% endfor %} </table>
+        {% endfor %}
+    </table>
 
     <h3>Provision New Account</h3>
     <form action="/api/users/create" method="post" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
         <input type="text" name="name" placeholder="Full Name" required style="margin-bottom: 10px; width: 45%;">&nbsp;
         <input type="email" name="email" placeholder="email@domain.com" required style="margin-bottom: 10px; width: 45%;"><br>
         <input type="password" name="password" placeholder="Password" required style="margin-bottom: 10px; width: 45%;">&nbsp;
-        
         <label>System Role:</label>
         <select name="role">
             <option value="read_only">Read-Only User</option>
@@ -52,9 +61,11 @@
             <td>{{ target.resource }}</td>
             <td><a href="{{ target.url }}" target="_blank">Link</a></td>
             <td style="font-size: 0.9em;">
-                {{ target.scan_frequency | capitalize }} | 
-                {% if target.extraction_mode == 'auto_clean' %}Body Only{% else %}Full Page{% endif %} |
-                {% if target.recursive %}Recursive{% else %}Single Page{% endif %}
+                {{ target.scan_frequency | capitalize }} |
+                {% if target.extraction_mode == 'auto_clean' %}Body Only
+                {% elif target.extraction_mode == 'body_no_ads' %}Body + Ad Filter
+                {% else %}Full Page{% endif %} |
+                {% if target.recursive %}Recursive (Depth 2){% else %}Single Page{% endif %}
             </td>
             <td>{{ target.last_scanned.strftime('%Y-%m-%d %H:%M') if target.last_scanned else 'Never' }}</td>
             <td>
@@ -72,7 +83,7 @@
     <form action="/api/targets" method="post" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
         <input type="text" name="resource" placeholder="Resource Name (e.g., OSHA)" required style="margin-bottom: 10px; width: 45%;">&nbsp;
         <input type="url" name="url" placeholder="https://..." required style="margin-bottom: 10px; width: 45%;"><br>
-        
+
         <label>Scan Frequency:</label>
         <select name="frequency" style="margin-right: 20px;">
             <option value="5_min">Every 5 Minutes (Testing)</option>
@@ -83,10 +94,11 @@
         <label>Scraping Mode:</label>
         <select name="mode" style="margin-right: 20px;">
             <option value="auto_clean">Body Only (Strip Headers/Nav)</option>
+            <option value="body_no_ads">Body Only + Ad Filter</option>
             <option value="full_page">Full Page</option>
         </select>
 
-        <label><input type="checkbox" name="recursive" value="true"> Recursive (Depth 1)</label><br><br>
+        <label><input type="checkbox" name="recursive" value="true"> Recursive (Depth 2)</label><br><br>
         <button type="submit" style="background-color: #17a2b8;">Add to Radar</button>
     </form>
 </div>
@@ -95,26 +107,31 @@
 {% if user.role == 'admin' %}
 
 <form action="/api/settings/update" method="post">
-    
+
     <div class="card">
         <h2>AI Engine Configuration</h2>
         <label>Active LLM Provider:</label><br>
         <select name="llm_provider" style="padding: 5px; font-size: 16px; margin-bottom: 15px;">
-            <option value="local" {% if settings.llm_provider == 'local' %}selected{% endif %}>Local Machine (Ollama)</option>
+            <option value="local"  {% if settings.llm_provider == 'local'  %}selected{% endif %}>Local Machine (Ollama)</option>
             <option value="openai" {% if settings.llm_provider == 'openai' %}selected{% endif %}>OpenAI API (ChatGPT)</option>
             <option value="claude" {% if settings.llm_provider == 'claude' %}selected{% endif %}>Anthropic API (Claude)</option>
             <option value="gemini" {% if settings.llm_provider == 'gemini' %}selected{% endif %}>Google API (Gemini)</option>
         </select>
-        
+
         <br><label>Local Target Model Name (if using Local):</label><br>
         <input type="text" name="local_model_name" value="{{ settings.local_model_name }}" size="50" placeholder="e.g., llama3"><br><br>
 
         <label>OpenAI API Key:</label><br>
-        <input type="password" name="openai_api_key" value="{{ settings.openai_api_key }}" size="50"><br><br>
+        <input type="password" name="openai_api_key" value="" size="50"
+               placeholder="{% if 'openai_api_key' in saved_secrets %}(saved — leave blank to keep){% else %}Paste key here{% endif %}"><br><br>
+
         <label>Anthropic API Key:</label><br>
-        <input type="password" name="claude_api_key" value="{{ settings.claude_api_key }}" size="50"><br><br>
+        <input type="password" name="claude_api_key" value="" size="50"
+               placeholder="{% if 'claude_api_key' in saved_secrets %}(saved — leave blank to keep){% else %}Paste key here{% endif %}"><br><br>
+
         <label>Google Gemini API Key:</label><br>
-        <input type="password" name="gemini_api_key" value="{{ settings.gemini_api_key }}" size="50">
+        <input type="password" name="gemini_api_key" value="" size="50"
+               placeholder="{% if 'gemini_api_key' in saved_secrets %}(saved — leave blank to keep){% else %}Paste key here{% endif %}">
     </div>
 
     <div class="card">
@@ -123,23 +140,31 @@
             <input type="checkbox" name="enable_emails" value="true" {% if settings.enable_emails == 'true' %}checked{% endif %}>
             Enable Email Notifications for New Drafts
         </label><br><br>
-        <label>SMTP Server & Port:</label><br>
+        <label>SMTP Server &amp; Port:</label><br>
         <input type="text" name="smtp_server" value="{{ settings.smtp_server }}" placeholder="smtp.gmail.com">&nbsp;
         <input type="text" name="smtp_port" value="{{ settings.smtp_port }}" size="5" placeholder="587"><br><br>
-        <label>SMTP Username & Password:</label><br>
+        <label>SMTP Username &amp; Password:</label><br>
         <input type="text" name="smtp_user" value="{{ settings.smtp_user }}" placeholder="youremail@domain.com">&nbsp;
-        <input type="password" name="smtp_pass" value="{{ settings.smtp_pass }}" placeholder="App Password"><br><br>
+        <input type="password" name="smtp_pass" value="" size="30"
+               placeholder="{% if 'smtp_pass' in saved_secrets %}(saved — leave blank to keep){% else %}App Password{% endif %}"><br><br>
         <label>Send Alerts To:</label><br>
         <input type="email" name="alert_email" value="{{ settings.alert_email }}" size="50" placeholder="admin_team@domain.com">
     </div>
 
     <div class="card">
         <h2>Confluence Integration</h2>
-        <label>Workspace URL:</label><br><input type="text" name="confluence_url" value="{{ settings.confluence_url }}" size="50"><br><br>
-        <label>Service Email:</label><br><input type="text" name="confluence_email" value="{{ settings.confluence_email }}" size="50"><br><br>
-        <label>API Token:</label><br><input type="password" name="confluence_api_token" value="{{ settings.confluence_api_token }}" size="50">
+        <p style="color: #666;">When an alert is approved in Triage, a page is automatically created in Confluence.</p>
+        <label>Workspace URL:</label><br>
+        <input type="text" name="confluence_url" value="{{ settings.confluence_url }}" size="50" placeholder="https://yourorg.atlassian.net"><br><br>
+        <label>Space Key:</label><br>
+        <input type="text" name="confluence_space_key" value="{{ settings.confluence_space_key }}" size="20" placeholder="e.g., COMP"><br><br>
+        <label>Service Email:</label><br>
+        <input type="text" name="confluence_email" value="{{ settings.confluence_email }}" size="50" placeholder="service@yourorg.com"><br><br>
+        <label>API Token:</label><br>
+        <input type="password" name="confluence_api_token" value="" size="50"
+               placeholder="{% if 'confluence_api_token' in saved_secrets %}(saved — leave blank to keep){% else %}Paste token here{% endif %}">
     </div>
-    
+
     <button type="submit" style="background-color: #28a745; width: 100%; font-size: 1.1em; padding: 10px;">Save System Configuration</button>
 </form>
 
@@ -149,7 +174,7 @@
     <div class="card" style="border-left: 5px solid #ffc107;">
         <h2>System Time Configuration (OS Level)</h2>
         <p style="color: #666;">Changes here directly affect the Linux server time via <code>timedatectl</code>, which dictates the Celery scheduler.</p>
-        
+
         <label>
             <input type="checkbox" name="use_ntp" value="true" {% if settings.use_ntp == 'true' %}checked{% endif %}>
             Use Automatic Network Time (NTP)
@@ -161,23 +186,37 @@
 
         <label>Server Timezone:</label><br>
         <input type="text" name="timezone" value="{{ settings.timezone }}" placeholder="America/Los_Angeles" size="30"><br><br>
-        
+
         <button type="submit" style="background-color: #ffc107; color: #333; font-weight: bold;">Sync OS Time</button>
     </div>
 </form>
+
+<div class="card" style="border-left: 5px solid #6f42c1;">
+    <h2>TLS Certificate</h2>
+    <p style="color: #666;">The server runs on HTTPS using <code>certs/server.crt</code>. Upload a CA-signed certificate and private key to replace the self-signed cert. A service restart is required to apply the change.</p>
+    <form action="/api/settings/upload-cert" method="post" enctype="multipart/form-data" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
+        <label>Certificate File (.crt / .pem):</label><br><br>
+        <input type="file" name="cert_file" accept=".crt,.pem,.cer" required><br><br>
+        <label>Private Key File (.key / .pem):</label><br><br>
+        <input type="file" name="key_file" accept=".key,.pem" required><br><br>
+        <button type="submit" style="background-color: #6f42c1;">Upload &amp; Replace Certificate</button>
+    </form>
+</div>
+
 <div class="card" style="border-left: 5px solid #17a2b8;">
-    <h2>Backup & Restore</h2>
-    <p style="color: #666;">Export your targets and API settings to a JSON file, or restore them from a previous backup to avoid reconfiguring from scratch after a database wipe.</p>
-    
+    <h2>Backup &amp; Restore</h2>
+    <p style="color: #666;">Export your targets and API settings to a JSON file, or restore them from a previous backup.</p>
+
     <form action="/api/settings/export" method="get" style="margin-bottom: 20px;">
         <button type="submit" style="background-color: #17a2b8;">Export Configuration (Download)</button>
     </form>
-    
+
     <form action="/api/settings/import" method="post" enctype="multipart/form-data" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
         <label>Restore from Backup (.json):</label><br><br>
         <input type="file" name="backup_file" accept=".json" required><br><br>
-        <button type="submit" style="background-color: #28a745;">Import & Apply</button>
+        <button type="submit" style="background-color: #28a745;">Import &amp; Apply</button>
     </form>
 </div>
+
 {% endif %}
 {% endblock %}

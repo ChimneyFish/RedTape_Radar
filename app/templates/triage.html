@@ -1,15 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Triage Inbox</h1>
-<p>Pending drafts will appear here.</p>
+<p>Review AI-generated change summaries below. Approve to publish to the dashboard or dismiss to discard.</p>
 {% for draft in drafts %}
 <div class="card">
     <h3>[{{ draft.target.resource }}] {{ draft.topic }}</h3>
-    <p><strong>Summary:</strong> {{ draft.summary_raw }}</p>
-    <form action="/api/drafts/{{ draft.id }}/approve" method="post">
+    <p><strong>Source:</strong> <a href="{{ draft.target.url }}" target="_blank">{{ draft.target.url }}</a></p>
+    <p><strong>AI Summary:</strong> {{ draft.summary_raw }}</p>
+    {% if draft.detected_dates %}
+    <p><strong>Dates/Deadlines Detected:</strong> {{ draft.detected_dates }}</p>
+    {% endif %}
+
+    <form action="/api/drafts/{{ draft.id }}/approve" method="post" style="margin-bottom: 10px;">
         <label>Actionable Steps:</label><br>
-        <textarea name="actionable_steps" required style="width: 100%;"></textarea><br><br>
-        <button type="submit">Approve & Publish</button>
+        <textarea name="actionable_steps" required style="width: 100%; min-height: 80px; margin: 6px 0;"></textarea><br>
+        <label>Key Deadlines (optional):</label><br>
+        <input type="text" name="key_deadlines" placeholder="e.g. Submit by 2026-09-01" style="width: 100%; margin: 6px 0;"><br><br>
+        <button type="submit" style="background-color: #28a745; margin-right: 10px;">Approve &amp; Publish</button>
+    </form>
+
+    <form action="/api/drafts/{{ draft.id }}/dismiss" method="post" style="display:inline;">
+        <button type="submit" style="background-color: #dc3545;" onclick="return confirm('Dismiss this draft? It will not be published.')">Dismiss</button>
     </form>
 </div>
 {% else %}

@@ -22,13 +22,40 @@ celery_app.conf.beat_schedule = {
     }
 }
 
+_AD_SELECTORS = [
+    "[class*='ad-']", "[class*='-ad']", "[class*='ads-']", "[class*='-ads']",
+    "[id*='ad-']", "[id*='-ad']", "[class*='banner']", "[id*='banner']",
+    "[class*='sponsor']", "[id*='sponsor']", "[class*='promo']", "[id*='promo']",
+    "[data-ad]", "[data-dfp]", "[data-google-ad]", "ins.adsbygoogle",
+    ".advertisement", "#advertisement", "[class*='widget']",
+]
+
 def extract_text(html_content: str, mode: str) -> str:
     soup = BeautifulSoup(html_content, "html.parser")
     if mode == "auto_clean":
-        for script in soup(["script", "style", "nav", "footer", "header", "aside"]): script.decompose()
-    else: 
-        for script in soup(["script", "style"]): script.decompose()
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+    elif mode == "body_no_ads":
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+        for selector in _AD_SELECTORS:
+            for el in soup.select(selector):
+                el.decompose()
+    else:  # full_page
+        for tag in soup(["script", "style"]):
+            tag.decompose()
     return "\n".join(line.strip() for line in soup.get_text(separator="\n").splitlines() if line.strip())
+
+def _collect_same_domain_links(soup, base_url: str, base_domain: str, visited: set, limit: int) -> list:
+    links = []
+    for a_tag in soup.find_all('a', href=True):
+        if len(visited) >= limit:
+            break
+        full_link = urljoin(base_url, a_tag['href'])
+        if urlparse(full_link).netloc == base_domain and full_link not in visited:
+            visited.add(full_link)
+            links.append(full_link)
+    return links
 
 def scrape_with_depth(base_url: str, mode: str, recursive: bool) -> str:
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -37,21 +64,34 @@ def scrape_with_depth(base_url: str, mode: str, recursive: bool) -> str:
         res.raise_for_status()
         master_text = extract_text(res.text, mode)
         if recursive:
-            soup = BeautifulSoup(res.text, "html.parser")
             base_domain = urlparse(base_url).netloc
-            links_visited = set([base_url])
-            for a_tag in soup.find_all('a', href=True):
-                if len(links_visited) > 5: break
-                full_link = urljoin(base_url, a_tag['href'])
-                if urlparse(full_link).netloc == base_domain and full_link not in links_visited:
-                    links_visited.add(full_link)
-                    try:
-                        sub_res = requests.get(full_link, headers=headers, timeout=10)
-                        master_text += f"\n\n--- Content from {full_link} ---\n"
-                        master_text += extract_text(sub_res.text, mode)
-                    except: pass
+            visited = {base_url}
+
+            # Depth 1: links on the base page (up to 5)
+            base_soup = BeautifulSoup(res.text, "html.parser")
+            depth1_links = _collect_same_domain_links(base_soup, base_url, base_domain, visited, limit=6)
+
+            for link in depth1_links:
+                try:
+                    sub_res = requests.get(link, headers=headers, timeout=10)
+                    master_text += f"\n\n--- Content from {link} ---\n"
+                    master_text += extract_text(sub_res.text, mode)
+
+                    # Depth 2: links on each depth-1 page (total cap: 20 pages)
+                    sub_soup = BeautifulSoup(sub_res.text, "html.parser")
+                    depth2_links = _collect_same_domain_links(sub_soup, link, base_domain, visited, limit=20)
+                    for link2 in depth2_links:
+                        try:
+                            sub_res2 = requests.get(link2, headers=headers, timeout=10)
+                            master_text += f"\n\n--- Content from {link2} ---\n"
+                            master_text += extract_text(sub_res2.text, mode)
+                        except:
+                            pass
+                except:
+                    pass
         return master_text[:15000]
-    except Exception: return ""
+    except Exception:
+        return ""
 
 def clean_json_response(raw_text: str) -> dict:
     clean_text = raw_text.replace('```json', '').replace('```', '').strip()
