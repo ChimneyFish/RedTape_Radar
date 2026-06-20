@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import shutil
 import subprocess
 from collections import defaultdict
 
@@ -224,18 +225,29 @@ async def update_system_time(
 ):
     ntp_enabled = use_ntp == "true"
     error_msg = None
-    try:
-        subprocess.run(["timedatectl", "set-timezone", timezone], check=True)
-        if ntp_enabled:
-            subprocess.run(["timedatectl", "set-ntp", "true"], check=True)
-        else:
-            subprocess.run(["timedatectl", "set-ntp", "false"], check=True)
-            if manual_time:
-                subprocess.run(["timedatectl", "set-time", manual_time], check=True)
-    except Exception as e:
-        error_msg = str(e)[:120]
 
-    # Always persist preferences regardless of OS-level success/failure
+    timedatectl_bin = shutil.which("timedatectl")
+    if timedatectl_bin:
+        # systemd-based system: apply at OS level
+        try:
+            subprocess.run([timedatectl_bin, "set-timezone", timezone], check=True)
+            if ntp_enabled:
+                subprocess.run([timedatectl_bin, "set-ntp", "true"], check=True)
+            else:
+                subprocess.run([timedatectl_bin, "set-ntp", "false"], check=True)
+                if manual_time:
+                    subprocess.run([timedatectl_bin, "set-time", manual_time], check=True)
+        except Exception as e:
+            error_msg = str(e)[:120]
+    else:
+        # Fallback: apply timezone to this process and Celery environment
+        try:
+            os.environ["TZ"] = timezone
+            time.tzset()
+        except AttributeError:
+            pass  # time.tzset() not available on all platforms
+
+    # Always persist preferences regardless of OS-level outcome
     for key, value in [("use_ntp", "true" if ntp_enabled else "false"), ("timezone", timezone)]:
         cfg = db.query(AppConfig).filter(AppConfig.key == key).first()
         if cfg:
