@@ -172,22 +172,32 @@
 
 <form action="/api/system/time" method="post">
     <div class="card" style="border-left: 5px solid #ffc107;">
-        <h2>System Time Configuration (OS Level)</h2>
-        <p style="color: #666;">Changes here directly affect the Linux server time via <code>timedatectl</code>, which dictates the Celery scheduler.</p>
+        <h2>Time &amp; Clock Configuration</h2>
+        <p style="color: #666;">OS-level time changes use <code>timedatectl</code> and require the service to have sufficient privileges. Display format applies immediately to the live clock.</p>
+
+        <label><b>Display Format (Live Clock):</b></label><br>
+        <label style="margin-right: 25px;">
+            <input type="radio" name="time_format" value="24h" {% if settings.time_format != '12h' %}checked{% endif %}>
+            24-Hour &nbsp;<code style="font-size:0.85em;">14:30:00</code>
+        </label>
+        <label>
+            <input type="radio" name="time_format" value="12h" {% if settings.time_format == '12h' %}checked{% endif %}>
+            12-Hour AM/PM &nbsp;<code style="font-size:0.85em;">2:30:00 PM</code>
+        </label><br><br>
+
+        <label><b>Server Timezone:</b></label><br>
+        <input type="text" name="timezone" value="{{ settings.timezone }}" placeholder="America/Los_Angeles" size="30">
+        <i style="color:#666; font-size:0.9em;">&nbsp;e.g. UTC, America/New_York, America/Chicago</i><br><br>
 
         <label>
             <input type="checkbox" name="use_ntp" value="true" {% if settings.use_ntp == 'true' %}checked{% endif %}>
-            Use Automatic Network Time (NTP)
+            <b>Enable NTP (automatic network time)</b>
         </label><br><br>
 
-        <label>Manual Date/Time Override (Format: YYYY-MM-DD HH:MM:SS):</label><br>
-        <input type="text" name="manual_time" placeholder="2026-10-15 14:30:00" size="30">
-        <i>(Leave blank if using NTP)</i><br><br>
+        <label style="color:#555;">Manual Date/Time Override — only applies if NTP is disabled (YYYY-MM-DD HH:MM:SS):</label><br>
+        <input type="text" name="manual_time" placeholder="2026-10-15 14:30:00" size="30"><br><br>
 
-        <label>Server Timezone:</label><br>
-        <input type="text" name="timezone" value="{{ settings.timezone }}" placeholder="America/Los_Angeles" size="30"><br><br>
-
-        <button type="submit" style="background-color: #ffc107; color: #333; font-weight: bold;">Sync OS Time</button>
+        <button type="submit" style="background-color: #ffc107; color: #333; font-weight: bold;">Apply Time Settings</button>
     </div>
 </form>
 

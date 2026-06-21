@@ -3,6 +3,7 @@ import time
 import json
 import shutil
 import subprocess
+import urllib.parse
 from collections import defaultdict
 
 from fastapi import FastAPI, Request, Depends, HTTPException, Form, UploadFile, File
@@ -106,7 +107,7 @@ async def view_settings(request: Request, db: Session = Depends(get_db), admin_u
         "openai_api_key": "", "gemini_api_key": "", "claude_api_key": "",
         "enable_emails": "false", "smtp_server": "", "smtp_port": "587",
         "smtp_user": "", "smtp_pass": "", "alert_email": "",
-        "use_ntp": "true", "timezone": "UTC",
+        "use_ntp": "true", "timezone": "UTC", "time_format": "24h",
         "confluence_url": "", "confluence_email": "",
         "confluence_api_token": "", "confluence_space_key": "",
     }
@@ -203,8 +204,8 @@ async def force_user_reset(target_id: int, db: Session = Depends(get_db), admin:
 async def update_settings(request: Request, db: Session = Depends(get_db), admin_user: User = Depends(auth.require_admin)):
     form_data = await request.form()
     for key, value in form_data.items():
-        if key in ["use_ntp", "manual_time", "timezone"]:
-            continue  # Managed by the separate NTP form
+        if key in ["use_ntp", "manual_time", "timezone", "time_format"]:
+            continue  # Managed by the separate time form
         if key in _SECRET_KEYS and not value:
             continue  # Preserve existing secret when field left blank
         config_item = db.query(AppConfig).filter(AppConfig.key == key).first()
@@ -220,6 +221,7 @@ async def update_settings(request: Request, db: Session = Depends(get_db), admin
 @app.post("/api/system/time")
 async def update_system_time(
     use_ntp: str = Form("false"), manual_time: str = Form(""), timezone: str = Form("UTC"),
+    time_format: str = Form("24h"),
     db: Session = Depends(get_db),
     admin_user: User = Depends(auth.require_admin),
 ):
@@ -230,17 +232,19 @@ async def update_system_time(
     if timedatectl_bin:
         # systemd-based system: apply at OS level
         try:
-            subprocess.run([timedatectl_bin, "set-timezone", timezone], check=True)
+            subprocess.run([timedatectl_bin, "set-timezone", timezone], check=True, capture_output=True, text=True)
             if ntp_enabled:
-                subprocess.run([timedatectl_bin, "set-ntp", "true"], check=True)
+                subprocess.run([timedatectl_bin, "set-ntp", "true"], check=True, capture_output=True, text=True)
             else:
-                subprocess.run([timedatectl_bin, "set-ntp", "false"], check=True)
+                subprocess.run([timedatectl_bin, "set-ntp", "false"], check=True, capture_output=True, text=True)
                 if manual_time:
-                    subprocess.run([timedatectl_bin, "set-time", manual_time], check=True)
+                    subprocess.run([timedatectl_bin, "set-time", manual_time], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            error_msg = (e.stderr.strip() or str(e))[:200]
         except Exception as e:
-            error_msg = str(e)[:120]
+            error_msg = str(e)[:200]
     else:
-        # Fallback: apply timezone to this process and Celery environment
+        # Fallback: apply timezone to this process environment
         try:
             os.environ["TZ"] = timezone
             time.tzset()
@@ -248,7 +252,11 @@ async def update_system_time(
             pass  # time.tzset() not available on all platforms
 
     # Always persist preferences regardless of OS-level outcome
-    for key, value in [("use_ntp", "true" if ntp_enabled else "false"), ("timezone", timezone)]:
+    for key, value in [
+        ("use_ntp", "true" if ntp_enabled else "false"),
+        ("timezone", timezone),
+        ("time_format", time_format),
+    ]:
         cfg = db.query(AppConfig).filter(AppConfig.key == key).first()
         if cfg:
             cfg.value = value
@@ -257,8 +265,15 @@ async def update_system_time(
     db.commit()
 
     if error_msg:
-        return RedirectResponse(url=f"/settings?error=Time+sync+failed:+{error_msg.replace(' ', '+')}", status_code=303)
+        return RedirectResponse(url=f"/settings?error={urllib.parse.quote(f'OS time sync failed: {error_msg}')}", status_code=303)
     return RedirectResponse(url="/settings?success=true", status_code=303)
+
+
+@app.get("/api/clock-config")
+async def get_clock_config(db: Session = Depends(get_db)):
+    keys = ["timezone", "time_format"]
+    configs = {cfg.key: cfg.value for cfg in db.query(AppConfig).filter(AppConfig.key.in_(keys)).all()}
+    return {"timezone": configs.get("timezone", "UTC"), "time_format": configs.get("time_format", "24h")}
 
 
 @app.get("/api/settings/export")

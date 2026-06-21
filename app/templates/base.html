@@ -6,6 +6,7 @@
         body { font-family: system-ui, sans-serif; margin: 0; background: #f4f7f6; color: #333; }
         .navbar { background: #0b2b40; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center;}
         .navbar a { color: white; text-decoration: none; margin-left: 20px; font-weight: 500; }
+        #live-clock { color: #aac4d9; font-family: monospace; font-size: 0.82em; letter-spacing: 0.4px; white-space: nowrap; }
         
         /* NEW: Flexbox layout for the logo container */
         .logo-container { display: flex; align-items: center; gap: 12px; }
@@ -26,6 +27,8 @@
             <span class="logo-text">RedTape Radar</span>
         </div>
         
+        <span id="live-clock"></span>
+
         <div class="nav-links">
             <a href="/">Dashboard</a>
             {% if user and user.role == 'admin' %}
@@ -38,5 +41,39 @@
         </div>
     </nav>
     <div class="container">{% block content %}{% endblock %}</div>
+<script>
+(function () {
+    var tz = 'UTC';
+    var fmt = '24h';
+
+    function tick() {
+        var el = document.getElementById('live-clock');
+        if (!el) return;
+        var now = new Date();
+        try {
+            var d = new Intl.DateTimeFormat('en-CA', {
+                timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
+            }).format(now);
+            var t = new Intl.DateTimeFormat('en-US', {
+                timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: fmt === '12h'
+            }).format(now);
+            el.textContent = d + ' ' + t + ' ' + tz;
+        } catch (e) {
+            el.textContent = now.toISOString().slice(0, 19).replace('T', ' ') + ' UTC';
+        }
+    }
+
+    function startClock() { tick(); setInterval(tick, 1000); }
+
+    fetch('/api/clock-config')
+        .then(function (r) { return r.json(); })
+        .then(function (cfg) {
+            tz = cfg.timezone || 'UTC';
+            fmt = cfg.time_format || '24h';
+            startClock();
+        })
+        .catch(startClock);
+})();
+</script>
 </body>
 </html>
