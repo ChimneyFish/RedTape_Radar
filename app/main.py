@@ -281,7 +281,16 @@ async def update_system_time(
     admin_user: User = Depends(auth.require_admin),
 ):
     ntp_enabled = use_ntp == "true"
+    timezone = timezone.strip().replace(' ', '_')
     error_msg = None
+
+    try:
+        ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, Exception):
+        return RedirectResponse(
+            url=f"/settings?error={urllib.parse.quote(f'Unknown timezone: {timezone!r}. Use IANA names like America/Los_Angeles or Europe/London.')}",
+            status_code=303,
+        )
 
     if ntp_enabled:
         ok, err = _sync_ntp()

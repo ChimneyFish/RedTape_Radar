@@ -59,7 +59,7 @@
             }).format(now);
             el.textContent = d + ' ' + t + ' ' + tz;
         } catch (e) {
-            el.textContent = now.toISOString().slice(0, 19).replace('T', ' ') + ' UTC';
+            el.textContent = now.toISOString().slice(0, 19).replace('T', ' ') + ' UTC [invalid tz: ' + tz + ']';
         }
     }
 
