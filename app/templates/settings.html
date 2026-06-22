@@ -67,7 +67,7 @@
                 {% else %}Full Page{% endif %} |
                 {% if target.recursive %}Recursive (Depth 2){% else %}Single Page{% endif %}
             </td>
-            <td>{{ target.last_scanned.strftime('%Y-%m-%d %H:%M') if target.last_scanned else 'Never' }}</td>
+            <td>{{ target.last_scanned | format_dt(settings.time_format, settings.timezone, False) if target.last_scanned else 'Never' }}</td>
             <td>
                 <form action="/api/targets/{{ target.id }}/delete" method="post" style="display:inline;">
                     <button type="submit" style="background-color: #dc3545; padding: 5px 10px;">Remove</button>
@@ -173,7 +173,7 @@
 <form action="/api/system/time" method="post">
     <div class="card" style="border-left: 5px solid #ffc107;">
         <h2>Time &amp; Clock Configuration</h2>
-        <p style="color: #666;">OS-level time changes use <code>timedatectl</code> and require the service to have sufficient privileges. Display format applies immediately to the live clock.</p>
+        <p style="color: #666;">Time sync is handled by the application directly (no OS privileges required). NTP queries <code>pool.ntp.org</code> to correct the app clock. Timezone and format apply to the live clock and all displayed timestamps.</p>
 
         <label><b>Display Format (Live Clock):</b></label><br>
         <label style="margin-right: 25px;">

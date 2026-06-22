@@ -20,10 +20,10 @@
 
 <h2>System Scan Logs</h2>
 <table border="1" width="100%" style="background: white; border-collapse: collapse; font-family: monospace; font-size: 0.9em;">
-    <tr style="background: #f0f0f0;"><th>Date & Time (UTC)</th><th>Target</th><th>Scan Result / Status</th></tr>
+    <tr style="background: #f0f0f0;"><th>Date &amp; Time ({{ timezone }})</th><th>Target</th><th>Scan Result / Status</th></tr>
     {% for log in logs %}
     <tr>
-        <td style="padding: 8px;">{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td style="padding: 8px;">{{ log.timestamp | format_dt(time_format, timezone) }}</td>
         <td style="padding: 8px;">{{ log.target.resource }}</td>
         <td style="padding: 8px; {% if 'Error' in log.status_message or 'Failed' in log.status_message %}color: red;{% endif %}">{{ log.status_message }}</td>
     </tr>

@@ -1,11 +1,12 @@
 import os
 import time
 import json
-import shutil
-import subprocess
 import urllib.parse
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone as dt_timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import ntplib
 from fastapi import FastAPI, Request, Depends, HTTPException, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
@@ -20,8 +21,52 @@ from .tasks import scan_single_target
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="RedTape Radar")
 
+@app.on_event("startup")
+async def _init_time_sync():
+    from .models import SessionLocal
+    db = SessionLocal()
+    try:
+        cfg = {c.key: c.value for c in db.query(AppConfig).filter(AppConfig.key.in_(["use_ntp", "manual_time"])).all()}
+    finally:
+        db.close()
+    if cfg.get("use_ntp") == "true":
+        _sync_ntp()
+    elif cfg.get("manual_time"):
+        _apply_manual_time(cfg["manual_time"])
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
+
+# --- App-level NTP offset (seconds to add to utcnow() to get NTP-corrected time) ---
+_ntp_offset: float = 0.0
+
+def _sync_ntp() -> tuple[bool, str]:
+    global _ntp_offset
+    try:
+        resp = ntplib.NTPClient().request('pool.ntp.org', version=3)
+        _ntp_offset = resp.offset
+        return True, ""
+    except Exception as e:
+        return False, str(e)[:200]
+
+def _apply_manual_time(manual_time_str: str) -> tuple[bool, str]:
+    global _ntp_offset
+    try:
+        manual_dt = datetime.strptime(manual_time_str, '%Y-%m-%d %H:%M:%S')
+        _ntp_offset = (manual_dt - datetime.utcnow()).total_seconds()
+        return True, ""
+    except Exception as e:
+        return False, str(e)[:200]
+
+def _format_dt(dt: datetime, fmt: str = '24h', tz_name: str = 'UTC', include_seconds: bool = True) -> str:
+    try:
+        aware = dt.replace(tzinfo=dt_timezone.utc).astimezone(ZoneInfo(tz_name))
+    except (ZoneInfoNotFoundError, Exception):
+        aware = dt
+    time_part = ('%I:%M:%S %p' if include_seconds else '%I:%M %p') if fmt == '12h' else ('%H:%M:%S' if include_seconds else '%H:%M')
+    return aware.strftime('%Y-%m-%d ' + time_part)
+
+templates.env.filters['format_dt'] = _format_dt
 
 # --- Constants ---
 _SECRET_KEYS = {"openai_api_key", "claude_api_key", "gemini_api_key", "smtp_pass", "confluence_api_token"}
@@ -83,11 +128,21 @@ async def unauthorized_redirect(request: Request, exc: HTTPException):
 # Page routes
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _get_time_config(db: Session) -> dict:
+    keys = ["timezone", "time_format"]
+    rows = {c.key: c.value for c in db.query(AppConfig).filter(AppConfig.key.in_(keys)).all()}
+    return {"timezone": rows.get("timezone", "UTC"), "time_format": rows.get("time_format", "24h")}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def view_dashboard(request: Request, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     alerts = db.query(PublishedAlert).order_by(PublishedAlert.published_at.desc()).limit(50).all()
     logs = db.query(ScanLog).order_by(ScanLog.timestamp.desc()).limit(20).all()
-    return templates.TemplateResponse(request=request, name="dashboard.html", context={"user": current_user, "alerts": alerts, "logs": logs})
+    time_cfg = _get_time_config(db)
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={
+        "user": current_user, "alerts": alerts, "logs": logs,
+        "time_format": time_cfg["time_format"], "timezone": time_cfg["timezone"],
+    })
 
 
 @app.get("/triage", response_class=HTMLResponse)
@@ -217,7 +272,7 @@ async def update_settings(request: Request, db: Session = Depends(get_db), admin
     return RedirectResponse(url="/settings?success=true", status_code=303)
 
 
-# OS Level Time Controller
+# App-level time controller (no OS/timedatectl dependency)
 @app.post("/api/system/time")
 async def update_system_time(
     use_ntp: str = Form("false"), manual_time: str = Form(""), timezone: str = Form("UTC"),
@@ -228,34 +283,20 @@ async def update_system_time(
     ntp_enabled = use_ntp == "true"
     error_msg = None
 
-    timedatectl_bin = shutil.which("timedatectl")
-    if timedatectl_bin:
-        # systemd-based system: apply at OS level
-        try:
-            subprocess.run([timedatectl_bin, "set-timezone", timezone], check=True, capture_output=True, text=True)
-            if ntp_enabled:
-                subprocess.run([timedatectl_bin, "set-ntp", "true"], check=True, capture_output=True, text=True)
-            else:
-                subprocess.run([timedatectl_bin, "set-ntp", "false"], check=True, capture_output=True, text=True)
-                if manual_time:
-                    subprocess.run([timedatectl_bin, "set-time", manual_time], check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError as e:
-            error_msg = (e.stderr.strip() or str(e))[:200]
-        except Exception as e:
-            error_msg = str(e)[:200]
-    else:
-        # Fallback: apply timezone to this process environment
-        try:
-            os.environ["TZ"] = timezone
-            time.tzset()
-        except AttributeError:
-            pass  # time.tzset() not available on all platforms
+    if ntp_enabled:
+        ok, err = _sync_ntp()
+        if not ok:
+            error_msg = f"NTP sync failed: {err}"
+    elif manual_time:
+        ok, err = _apply_manual_time(manual_time)
+        if not ok:
+            error_msg = f"Invalid manual time: {err}"
 
-    # Always persist preferences regardless of OS-level outcome
     for key, value in [
         ("use_ntp", "true" if ntp_enabled else "false"),
         ("timezone", timezone),
         ("time_format", time_format),
+        ("manual_time", manual_time),
     ]:
         cfg = db.query(AppConfig).filter(AppConfig.key == key).first()
         if cfg:
@@ -265,7 +306,7 @@ async def update_system_time(
     db.commit()
 
     if error_msg:
-        return RedirectResponse(url=f"/settings?error={urllib.parse.quote(f'OS time sync failed: {error_msg}')}", status_code=303)
+        return RedirectResponse(url=f"/settings?error={urllib.parse.quote(error_msg)}", status_code=303)
     return RedirectResponse(url="/settings?success=true", status_code=303)
 
 
