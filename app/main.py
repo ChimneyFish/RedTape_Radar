@@ -471,7 +471,8 @@ async def export_settings(db: Session = Depends(get_db), admin: User = Depends(a
         "config": {c.key: c.value for c in configs},
         "targets": [
             {"resource": t.resource, "url": t.url, "extraction_mode": t.extraction_mode,
-             "scan_frequency": t.scan_frequency, "recursive": t.recursive, "alert_email": t.alert_email}
+             "scan_frequency": t.scan_frequency, "recursive": t.recursive, "alert_email": t.alert_email,
+             "alert_on_broken_link": t.alert_on_broken_link}
             for t in targets
         ],
     }
@@ -504,6 +505,7 @@ async def import_settings(backup_file: UploadFile = File(...), db: Session = Dep
                         scan_frequency=t.get("scan_frequency", "weekly"),
                         recursive=t.get("recursive", False),
                         alert_email=t.get("alert_email"),
+                        alert_on_broken_link=t.get("alert_on_broken_link", True),
                     ))
         db.commit()
     except Exception as e:
@@ -536,12 +538,14 @@ async def upload_certificate(
 async def add_monitored_target(
     url: str = Form(...), resource: str = Form(...), mode: str = Form("auto_clean"),
     frequency: str = Form("weekly"), recursive: str = Form("false"), alert_email: str = Form(""),
+    alert_on_broken_link: str = Form("false"),
     db: Session = Depends(get_db), editor_user: User = Depends(auth.require_editor),
 ):
     new_target = MonitoredTarget(
         url=url, resource=resource, extraction_mode=mode,
         scan_frequency=frequency, recursive=(recursive == "true"),
         alert_email=(alert_email.strip() or None),
+        alert_on_broken_link=(alert_on_broken_link == "true"),
     )
     db.add(new_target)
     db.commit()
@@ -553,6 +557,7 @@ async def add_monitored_target(
 async def update_monitored_target(
     target_id: int, url: str = Form(...), resource: str = Form(...), mode: str = Form("auto_clean"),
     frequency: str = Form("weekly"), recursive: str = Form("false"), alert_email: str = Form(""),
+    alert_on_broken_link: str = Form("false"),
     db: Session = Depends(get_db), editor_user: User = Depends(auth.require_editor),
 ):
     target = db.query(MonitoredTarget).filter(MonitoredTarget.id == target_id).first()
@@ -564,6 +569,7 @@ async def update_monitored_target(
         target.scan_frequency = frequency
         target.recursive = (recursive == "true")
         target.alert_email = alert_email.strip() or None
+        target.alert_on_broken_link = (alert_on_broken_link == "true")
         if url_changed:
             # Old hash/text belong to a different page now -- re-baseline instead
             # of diffing unrelated content on the next scan.

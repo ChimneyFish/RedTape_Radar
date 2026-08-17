@@ -2,17 +2,23 @@ from celery import Celery
 from celery.schedules import crontab
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
+import io
 import requests
 import hashlib
 import json
 import smtplib
 from email.mime.text import MIMEText
 from bs4 import BeautifulSoup
+from pypdf import PdfReader
 from urllib.parse import urljoin, urlparse
 
 from .models import SessionLocal, MonitoredTarget, AlertDraft, AppConfig, ScanLog
 
 celery_app = Celery("redtape_tasks", broker="redis://localhost:6379/0")
+
+# Consecutive failed scans required before a target is declared broken and alerted on,
+# so a single transient network blip doesn't page anyone.
+BROKEN_LINK_THRESHOLD = 2
 
 # Changed to run every 5 minutes
 celery_app.conf.beat_schedule = {
@@ -29,6 +35,19 @@ _AD_SELECTORS = [
     "[data-ad]", "[data-dfp]", "[data-google-ad]", "ins.adsbygoogle",
     ".advertisement", "#advertisement", "[class*='widget']",
 ]
+
+def _is_pdf(url: str, content_type: str) -> bool:
+    return "application/pdf" in (content_type or "").lower() or urlparse(url).path.lower().endswith(".pdf")
+
+def extract_pdf_text(pdf_bytes: bytes) -> str:
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    pages = []
+    for page in reader.pages:
+        try:
+            pages.append(page.extract_text() or "")
+        except Exception:
+            pass
+    return "\n".join(line.strip() for line in "\n".join(pages).splitlines() if line.strip())
 
 def extract_text(html_content: str, mode: str) -> str:
     soup = BeautifulSoup(html_content, "html.parser")
@@ -57,13 +76,16 @@ def _collect_same_domain_links(soup, base_url: str, base_domain: str, visited: s
             links.append(full_link)
     return links
 
-def scrape_with_depth(base_url: str, mode: str, recursive: bool) -> str:
+def scrape_with_depth(base_url: str, mode: str, recursive: bool) -> tuple[str, str]:
+    """Returns (extracted_text, error_message). error_message is '' on success."""
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         res = requests.get(base_url, headers=headers, timeout=15)
         res.raise_for_status()
-        master_text = extract_text(res.text, mode)
-        if recursive:
+        base_is_pdf = _is_pdf(base_url, res.headers.get("Content-Type", ""))
+        master_text = extract_pdf_text(res.content) if base_is_pdf else extract_text(res.text, mode)
+
+        if recursive and not base_is_pdf:
             base_domain = urlparse(base_url).netloc
             visited = {base_url}
 
@@ -74,7 +96,11 @@ def scrape_with_depth(base_url: str, mode: str, recursive: bool) -> str:
             for link in depth1_links:
                 try:
                     sub_res = requests.get(link, headers=headers, timeout=10)
+                    sub_res.raise_for_status()
                     master_text += f"\n\n--- Content from {link} ---\n"
+                    if _is_pdf(link, sub_res.headers.get("Content-Type", "")):
+                        master_text += extract_pdf_text(sub_res.content)
+                        continue  # nothing further to crawl inside a PDF
                     master_text += extract_text(sub_res.text, mode)
 
                     # Depth 2: links on each depth-1 page (total cap: 20 pages)
@@ -83,15 +109,19 @@ def scrape_with_depth(base_url: str, mode: str, recursive: bool) -> str:
                     for link2 in depth2_links:
                         try:
                             sub_res2 = requests.get(link2, headers=headers, timeout=10)
+                            sub_res2.raise_for_status()
                             master_text += f"\n\n--- Content from {link2} ---\n"
-                            master_text += extract_text(sub_res2.text, mode)
-                        except:
+                            if _is_pdf(link2, sub_res2.headers.get("Content-Type", "")):
+                                master_text += extract_pdf_text(sub_res2.content)
+                            else:
+                                master_text += extract_text(sub_res2.text, mode)
+                        except Exception:
                             pass
-                except:
+                except Exception:
                     pass
-        return master_text[:15000]
-    except Exception:
-        return ""
+        return master_text[:15000], ""
+    except Exception as e:
+        return "", str(e)[:300]
 
 def clean_json_response(raw_text: str) -> dict:
     clean_text = raw_text.replace('```json', '').replace('```', '').strip()
@@ -118,15 +148,13 @@ def call_llm(prompt: str, config: dict) -> dict:
             return json.loads(res.json()['response'])
     except Exception as e: raise Exception(f"LLM Error ({provider}): {str(e)}")
 
-def send_alert_email(config: dict, target_name: str, topic: str, to_email: str = None):
-    if config.get("enable_emails") != "true": return
-    recipient = to_email or config.get("alert_email")
-    if not recipient: return
+def _send_email(config: dict, to_email: str, subject: str, body: str):
+    if config.get("enable_emails") != "true" or not to_email: return
     try:
-        msg = MIMEText(f"RedTape Radar detected a change on {target_name}.\nTopic: {topic}\nLog in to Triage Inbox to review.")
-        msg['Subject'] = f"[RedTape Alert] Change Detected: {target_name}"
+        msg = MIMEText(body)
+        msg['Subject'] = subject
         msg['From'] = config.get("smtp_user")
-        msg['To'] = recipient
+        msg['To'] = to_email
         server = smtplib.SMTP(config.get("smtp_server"), int(config.get("smtp_port", 587)))
         server.starttls()
         server.login(config.get("smtp_user"), config.get("smtp_pass"))
@@ -134,15 +162,48 @@ def send_alert_email(config: dict, target_name: str, topic: str, to_email: str =
         server.quit()
     except Exception: pass
 
+def send_alert_email(config: dict, target_name: str, topic: str, to_email: str = None):
+    _send_email(config, to_email or config.get("alert_email"),
+        f"[RedTape Alert] Change Detected: {target_name}",
+        f"RedTape Radar detected a change on {target_name}.\nTopic: {topic}\nLog in to Triage Inbox to review.")
+
+def send_broken_link_alert(config: dict, target_name: str, url: str, reason: str, to_email: str):
+    # Broken-link alerts only ever go to this target's own configured address -- no global fallback.
+    _send_email(config, to_email,
+        f"[RedTape Alert] Broken Link: {target_name}",
+        f"RedTape Radar could not reach a monitored URL after {BROKEN_LINK_THRESHOLD} consecutive attempts.\n\n"
+        f"Resource: {target_name}\nURL: {url}\nReason: {reason}\n\n"
+        f"It will keep being retried; you'll get a follow-up email once it's reachable again.")
+
+def send_link_restored_alert(config: dict, target_name: str, url: str, to_email: str):
+    # Same as above -- this target's own configured address only.
+    _send_email(config, to_email,
+        f"[RedTape Alert] Link Restored: {target_name}",
+        f"RedTape Radar can reach this monitored URL again.\n\nResource: {target_name}\nURL: {url}")
+
 def _process_target(target, db, config, now):
     """Core engine logic extracted for reuse by the scheduler and the instant-baseline task"""
     try:
-        current_text = scrape_with_depth(target.url, target.extraction_mode, target.recursive)
+        current_text, fetch_error = scrape_with_depth(target.url, target.extraction_mode, target.recursive)
         if not current_text:
-            db.add(ScanLog(target_id=target.id, status_message="Failed to extract text from URL."))
+            target.consecutive_failures = (target.consecutive_failures or 0) + 1
+            reason = fetch_error or "Failed to extract text from URL."
+            db.add(ScanLog(target_id=target.id, status_message=f"Failed to fetch URL ({target.consecutive_failures} in a row): {reason}"[:255]))
+            if target.consecutive_failures >= BROKEN_LINK_THRESHOLD and not target.is_broken:
+                target.is_broken = True
+                db.add(ScanLog(target_id=target.id, status_message=f"Broken Link Alert: Failed {target.consecutive_failures} consecutive scans."[:255]))
+                if target.alert_on_broken_link is not False and target.alert_email:
+                    send_broken_link_alert(config, target.resource, target.url, reason, target.alert_email)
             db.commit()
             return
-        
+
+        if target.is_broken:
+            db.add(ScanLog(target_id=target.id, status_message="Link is reachable again."))
+            if target.alert_on_broken_link is not False and target.alert_email:
+                send_link_restored_alert(config, target.resource, target.url, target.alert_email)
+        target.is_broken = False
+        target.consecutive_failures = 0
+
         current_hash = hashlib.sha256(current_text.encode('utf-8')).hexdigest()
         
         if target.last_hash == current_hash:
@@ -193,10 +254,10 @@ def scan_all_targets():
         targets = db.query(MonitoredTarget).filter(MonitoredTarget.is_active == True).all()
         for target in targets:
             freq = target.scan_frequency
-            if freq == "5_min": threshold = now - timedelta(minutes=5)
-            elif freq == "hourly": threshold = now - timedelta(hours=1)
+            if freq == "hourly": threshold = now - timedelta(hours=1)
             elif freq == "daily": threshold = now - timedelta(days=1)
-            else: threshold = now - timedelta(days=7)
+            elif freq == "monthly": threshold = now - timedelta(days=30)
+            else: threshold = now - timedelta(days=7)  # weekly (default)
 
             if target.last_scanned and target.last_scanned > threshold:
                 continue 

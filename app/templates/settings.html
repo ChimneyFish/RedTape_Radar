@@ -55,7 +55,7 @@
 <div class="card">
     <h2>Monitored Websites</h2>
     <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
-        <tr><th>Resource</th><th>URL</th><th>Config</th><th>Alert Email</th><th>Last Scanned</th><th>Action</th></tr>
+        <tr><th>Resource</th><th>URL</th><th>Config</th><th>Alert Email</th><th>Status</th><th>Last Scanned</th><th>Action</th></tr>
         {% for target in targets %}
         <tr>
             <td>{{ target.resource }}</td>
@@ -68,6 +68,13 @@
                 {% if target.recursive %}Recursive (Depth 2){% else %}Single Page{% endif %}
             </td>
             <td style="font-size: 0.9em;">{{ target.alert_email or '(default)' }}</td>
+            <td>
+                {% if target.is_broken %}
+                <span style="color: #721c24; background: #f8d7da; padding: 2px 8px; border-radius: 4px; font-size: 0.85em;">BROKEN</span>
+                {% else %}
+                <span style="color: #155724; background: #d4edda; padding: 2px 8px; border-radius: 4px; font-size: 0.85em;">OK</span>
+                {% endif %}
+            </td>
             <td>{{ target.last_scanned | format_dt(settings.time_format, settings.timezone, False) if target.last_scanned else 'Never' }}</td>
             <td>
                 <button type="button" onclick="var r=document.getElementById('edit-row-{{ target.id }}'); r.style.display = (r.style.display === 'table-row') ? 'none' : 'table-row';"
@@ -78,17 +85,17 @@
             </td>
         </tr>
         <tr id="edit-row-{{ target.id }}" style="display:none; background:#f9f9f9;">
-            <td colspan="6">
+            <td colspan="7">
                 <form action="/api/targets/{{ target.id }}/update" method="post" style="padding: 10px;">
                     <input type="text" name="resource" value="{{ target.resource }}" required style="margin-bottom: 10px; width: 45%;">&nbsp;
                     <input type="url" name="url" value="{{ target.url }}" required style="margin-bottom: 10px; width: 45%;"><br>
 
                     <label>Scan Frequency:</label>
                     <select name="frequency" style="margin-right: 20px;">
-                        <option value="5_min" {% if target.scan_frequency == '5_min' %}selected{% endif %}>Every 5 Minutes (Testing)</option>
                         <option value="hourly" {% if target.scan_frequency == 'hourly' %}selected{% endif %}>Hourly</option>
                         <option value="daily" {% if target.scan_frequency == 'daily' %}selected{% endif %}>Daily</option>
                         <option value="weekly" {% if target.scan_frequency == 'weekly' %}selected{% endif %}>Weekly</option>
+                        <option value="monthly" {% if target.scan_frequency == 'monthly' %}selected{% endif %}>Monthly</option>
                     </select>
                     <label>Scraping Mode:</label>
                     <select name="mode" style="margin-right: 20px;">
@@ -102,26 +109,30 @@
                     <label>Alert Email (optional — overrides the default "Send Alerts To" address for this target only):</label><br>
                     <input type="email" name="alert_email" value="{{ target.alert_email or '' }}" placeholder="dept_team@domain.com" style="margin-bottom: 10px; width: 45%;"><br>
 
+                    <input type="hidden" name="alert_on_broken_link" value="false">
+                    <label><input type="checkbox" name="alert_on_broken_link" value="true" {% if target.alert_on_broken_link is not sameas false %}checked{% endif %}>
+                        Email the Alert Email above if this link breaks (requires an Alert Email set)</label><br><br>
+
                     <button type="submit" style="background-color: #28a745;">Save Changes</button>
                 </form>
             </td>
         </tr>
         {% else %}
-        <tr><td colspan="6">No targets are currently being monitored.</td></tr>
+        <tr><td colspan="7">No targets are currently being monitored.</td></tr>
         {% endfor %}
     </table>
 
     <h3>Add New Target</h3>
     <form action="/api/targets" method="post" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
         <input type="text" name="resource" placeholder="Resource Name (e.g., OSHA)" required style="margin-bottom: 10px; width: 45%;">&nbsp;
-        <input type="url" name="url" placeholder="https://..." required style="margin-bottom: 10px; width: 45%;"><br>
+        <input type="url" name="url" placeholder="https://... (a direct .pdf link is fine too)" required style="margin-bottom: 10px; width: 45%;"><br>
 
         <label>Scan Frequency:</label>
         <select name="frequency" style="margin-right: 20px;">
-            <option value="5_min">Every 5 Minutes (Testing)</option>
             <option value="hourly">Hourly</option>
             <option value="daily">Daily</option>
             <option value="weekly" selected>Weekly</option>
+            <option value="monthly">Monthly</option>
         </select>
         <label>Scraping Mode:</label>
         <select name="mode" style="margin-right: 20px;">
@@ -134,6 +145,10 @@
 
         <label>Alert Email (optional — overrides the default "Send Alerts To" address for this target only):</label><br>
         <input type="email" name="alert_email" placeholder="dept_team@domain.com" style="margin-bottom: 10px; width: 45%;"><br>
+
+        <input type="hidden" name="alert_on_broken_link" value="false">
+        <label><input type="checkbox" name="alert_on_broken_link" value="true" checked>
+            Email the Alert Email above if this link breaks (requires an Alert Email set)</label><br><br>
 
         <button type="submit" style="background-color: #17a2b8;">Add to Radar</button>
     </form>

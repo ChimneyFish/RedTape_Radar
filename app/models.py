@@ -40,6 +40,9 @@ class MonitoredTarget(Base):
     last_text = Column(Text, nullable=True)  # <-- NEW: Stores the text snapshot for AI diff comparison
     is_active = Column(Boolean, default=True)
     alert_email = Column(String(255), nullable=True)  # Per-target override; falls back to global alert_email if unset
+    consecutive_failures = Column(Integer, default=0)
+    is_broken = Column(Boolean, default=False)  # True once consecutive_failures crosses the broken-link threshold
+    alert_on_broken_link = Column(Boolean, default=True)  # Gates the broken/restored emails only; detection itself always runs
     drafts = relationship("AlertDraft", back_populates="target", cascade="all, delete-orphan")
     logs = relationship("ScanLog", back_populates="target", cascade="all, delete-orphan")
 
