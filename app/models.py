@@ -39,6 +39,7 @@ class MonitoredTarget(Base):
     last_hash = Column(String(64), nullable=True)
     last_text = Column(Text, nullable=True)  # <-- NEW: Stores the text snapshot for AI diff comparison
     is_active = Column(Boolean, default=True)
+    alert_email = Column(String(255), nullable=True)  # Per-target override; falls back to global alert_email if unset
     drafts = relationship("AlertDraft", back_populates="target", cascade="all, delete-orphan")
     logs = relationship("ScanLog", back_populates="target", cascade="all, delete-orphan")
 
@@ -75,5 +76,5 @@ class PublishedAlert(Base):
 class AppConfig(Base):
     __tablename__ = "app_config"
     key = Column(String(50), primary_key=True, index=True)
-    value = Column(String(500), nullable=True)
+    value = Column(Text, nullable=True)  # Text (not VARCHAR) so it can hold long values like a SAML IdP certificate
     is_secret = Column(Boolean, default=False)

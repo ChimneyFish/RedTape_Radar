@@ -55,7 +55,7 @@
 <div class="card">
     <h2>Monitored Websites</h2>
     <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
-        <tr><th>Resource</th><th>URL</th><th>Config</th><th>Last Scanned</th><th>Action</th></tr>
+        <tr><th>Resource</th><th>URL</th><th>Config</th><th>Alert Email</th><th>Last Scanned</th><th>Action</th></tr>
         {% for target in targets %}
         <tr>
             <td>{{ target.resource }}</td>
@@ -67,15 +67,47 @@
                 {% else %}Full Page{% endif %} |
                 {% if target.recursive %}Recursive (Depth 2){% else %}Single Page{% endif %}
             </td>
+            <td style="font-size: 0.9em;">{{ target.alert_email or '(default)' }}</td>
             <td>{{ target.last_scanned | format_dt(settings.time_format, settings.timezone, False) if target.last_scanned else 'Never' }}</td>
             <td>
+                <button type="button" onclick="var r=document.getElementById('edit-row-{{ target.id }}'); r.style.display = (r.style.display === 'table-row') ? 'none' : 'table-row';"
+                        style="background-color: #6c757d; padding: 5px 10px;">Edit</button>
                 <form action="/api/targets/{{ target.id }}/delete" method="post" style="display:inline;">
                     <button type="submit" style="background-color: #dc3545; padding: 5px 10px;">Remove</button>
                 </form>
             </td>
         </tr>
+        <tr id="edit-row-{{ target.id }}" style="display:none; background:#f9f9f9;">
+            <td colspan="6">
+                <form action="/api/targets/{{ target.id }}/update" method="post" style="padding: 10px;">
+                    <input type="text" name="resource" value="{{ target.resource }}" required style="margin-bottom: 10px; width: 45%;">&nbsp;
+                    <input type="url" name="url" value="{{ target.url }}" required style="margin-bottom: 10px; width: 45%;"><br>
+
+                    <label>Scan Frequency:</label>
+                    <select name="frequency" style="margin-right: 20px;">
+                        <option value="5_min" {% if target.scan_frequency == '5_min' %}selected{% endif %}>Every 5 Minutes (Testing)</option>
+                        <option value="hourly" {% if target.scan_frequency == 'hourly' %}selected{% endif %}>Hourly</option>
+                        <option value="daily" {% if target.scan_frequency == 'daily' %}selected{% endif %}>Daily</option>
+                        <option value="weekly" {% if target.scan_frequency == 'weekly' %}selected{% endif %}>Weekly</option>
+                    </select>
+                    <label>Scraping Mode:</label>
+                    <select name="mode" style="margin-right: 20px;">
+                        <option value="auto_clean" {% if target.extraction_mode == 'auto_clean' %}selected{% endif %}>Body Only (Strip Headers/Nav)</option>
+                        <option value="body_no_ads" {% if target.extraction_mode == 'body_no_ads' %}selected{% endif %}>Body Only + Ad Filter</option>
+                        <option value="full_page" {% if target.extraction_mode == 'full_page' %}selected{% endif %}>Full Page</option>
+                    </select>
+
+                    <label><input type="checkbox" name="recursive" value="true" {% if target.recursive %}checked{% endif %}> Recursive (Depth 2)</label><br><br>
+
+                    <label>Alert Email (optional — overrides the default "Send Alerts To" address for this target only):</label><br>
+                    <input type="email" name="alert_email" value="{{ target.alert_email or '' }}" placeholder="dept_team@domain.com" style="margin-bottom: 10px; width: 45%;"><br>
+
+                    <button type="submit" style="background-color: #28a745;">Save Changes</button>
+                </form>
+            </td>
+        </tr>
         {% else %}
-        <tr><td colspan="5">No targets are currently being monitored.</td></tr>
+        <tr><td colspan="6">No targets are currently being monitored.</td></tr>
         {% endfor %}
     </table>
 
@@ -99,6 +131,10 @@
         </select>
 
         <label><input type="checkbox" name="recursive" value="true"> Recursive (Depth 2)</label><br><br>
+
+        <label>Alert Email (optional — overrides the default "Send Alerts To" address for this target only):</label><br>
+        <input type="email" name="alert_email" placeholder="dept_team@domain.com" style="margin-bottom: 10px; width: 45%;"><br>
+
         <button type="submit" style="background-color: #17a2b8;">Add to Radar</button>
     </form>
 </div>
@@ -135,6 +171,44 @@
     </div>
 
     <div class="card">
+        <h2>Single Sign-On (Microsoft Entra ID / SAML)</h2>
+        <p style="color: #666;">Use the <b>SSO Metadata Exchange</b> card below to upload Entra ID's Federation Metadata XML (populates the fields here automatically) and to download RedTape Radar's own SP metadata XML for the Entra ID side.</p>
+
+        <input type="hidden" name="saml_enabled" value="false">
+        <label>
+            <input type="checkbox" name="saml_enabled" value="true" {% if settings.saml_enabled == 'true' %}checked{% endif %}>
+            Enable "Sign in with Microsoft" on the login page
+        </label><br><br>
+
+        <input type="hidden" name="saml_auto_provision" value="false">
+        <label>
+            <input type="checkbox" name="saml_auto_provision" value="true" {% if settings.saml_auto_provision == 'true' %}checked{% endif %}>
+            Auto-provision a new local account the first time an unrecognized SSO email signs in
+        </label><br><br>
+
+        <label>Default Role for Auto-Provisioned SSO Users:</label><br>
+        <select name="saml_default_role" style="margin-bottom: 15px;">
+            <option value="read_only" {% if settings.saml_default_role == 'read_only' %}selected{% endif %}>Read-Only User</option>
+            <option value="editor" {% if settings.saml_default_role == 'editor' %}selected{% endif %}>Target Editor (URLs Only)</option>
+            <option value="admin" {% if settings.saml_default_role == 'admin' %}selected{% endif %}>System Administrator</option>
+        </select><br>
+
+        <label>IdP Entity ID:</label><br>
+        <input type="text" name="idp_entity_id" value="{{ settings.idp_entity_id }}" size="70" placeholder="https://sts.windows.net/&lt;tenant-id&gt;/"><br><br>
+        <label>IdP Single Sign-On URL:</label><br>
+        <input type="text" name="idp_sso_url" value="{{ settings.idp_sso_url }}" size="70" placeholder="https://login.microsoftonline.com/&lt;tenant-id&gt;/saml2"><br><br>
+        <label>IdP Single Logout URL (optional):</label><br>
+        <input type="text" name="idp_slo_url" value="{{ settings.idp_slo_url }}" size="70" placeholder="https://login.microsoftonline.com/&lt;tenant-id&gt;/saml2"><br><br>
+        <label>IdP Signing Certificate (X.509, PEM body only):</label><br>
+        <textarea name="idp_x509_cert" rows="6" style="width: 100%; font-family: monospace; font-size: 0.8em;" placeholder="MIID...">{{ settings.idp_x509_cert }}</textarea><br><br>
+
+        <label>RedTape Radar SP Entity ID (give this to Entra ID, or just upload the SP metadata file below):</label><br>
+        <code style="font-size: 0.85em;">{{ sp_entity_id }}</code><br><br>
+        <label>RedTape Radar ACS (Reply) URL:</label><br>
+        <code style="font-size: 0.85em;">{{ sp_acs_url }}</code>
+    </div>
+
+    <div class="card">
         <h2>Email Alert Settings</h2>
         <label>
             <input type="checkbox" name="enable_emails" value="true" {% if settings.enable_emails == 'true' %}checked{% endif %}>
@@ -147,7 +221,7 @@
         <input type="text" name="smtp_user" value="{{ settings.smtp_user }}" placeholder="youremail@domain.com">&nbsp;
         <input type="password" name="smtp_pass" value="" size="30"
                placeholder="{% if 'smtp_pass' in saved_secrets %}(saved — leave blank to keep){% else %}App Password{% endif %}"><br><br>
-        <label>Send Alerts To:</label><br>
+        <label>Send Alerts To (default — used for any target without its own Alert Email set):</label><br>
         <input type="email" name="alert_email" value="{{ settings.alert_email }}" size="50" placeholder="admin_team@domain.com">
     </div>
 
@@ -200,6 +274,21 @@
         <button type="submit" style="background-color: #ffc107; color: #333; font-weight: bold;">Apply Time Settings</button>
     </div>
 </form>
+
+<div class="card" style="border-left: 5px solid #0263e0;">
+    <h2>SSO Metadata Exchange</h2>
+    <p style="color: #666;">Two-way handoff with the Entra ID app registration's SAML setup page: pull its Federation Metadata XML in, and push RedTape Radar's own SP metadata XML out.</p>
+
+    <form action="/saml/metadata" method="get" style="margin-bottom: 20px;">
+        <button type="submit" style="background-color: #0263e0;">Download RedTape Radar SP Metadata (Upload to Entra ID)</button>
+    </form>
+
+    <form action="/api/settings/saml/import-metadata" method="post" enctype="multipart/form-data" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
+        <label>Import Entra ID Federation Metadata XML (from Entra ID &gt; Enterprise Applications &gt; your app &gt; Single sign-on &gt; SAML Certificates &gt; Federation Metadata XML):</label><br><br>
+        <input type="file" name="idp_metadata_file" accept=".xml" required><br><br>
+        <button type="submit" style="background-color: #28a745;">Import &amp; Populate SSO Fields</button>
+    </form>
+</div>
 
 <div class="card" style="border-left: 5px solid #6f42c1;">
     <h2>TLS Certificate</h2>

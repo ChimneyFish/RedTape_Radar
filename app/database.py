@@ -1,7 +1,8 @@
 import os
-from sqlalchemy import create_backend, create_engine
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from .models import Base
+from .migrations import run_migrations
 
 DATABASE_URL = "sqlite:///./redtape_radar.db"
 
@@ -12,8 +13,9 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
-    # Creates the .db file and tables if they don't exist yet
-    Base.metadata.create_all(bind=engine)
+    # Creates the .db file and tables if they don't exist yet, and migrates
+    # any existing tables to the current schema without dropping data.
+    run_migrations(engine, Base)
 
 def get_db():
     """Dependency helper to yield database sessions to FastAPI routes."""

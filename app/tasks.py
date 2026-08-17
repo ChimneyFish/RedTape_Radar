@@ -118,13 +118,15 @@ def call_llm(prompt: str, config: dict) -> dict:
             return json.loads(res.json()['response'])
     except Exception as e: raise Exception(f"LLM Error ({provider}): {str(e)}")
 
-def send_alert_email(config: dict, target_name: str, topic: str):
+def send_alert_email(config: dict, target_name: str, topic: str, to_email: str = None):
     if config.get("enable_emails") != "true": return
+    recipient = to_email or config.get("alert_email")
+    if not recipient: return
     try:
         msg = MIMEText(f"RedTape Radar detected a change on {target_name}.\nTopic: {topic}\nLog in to Triage Inbox to review.")
         msg['Subject'] = f"[RedTape Alert] Change Detected: {target_name}"
         msg['From'] = config.get("smtp_user")
-        msg['To'] = config.get("alert_email")
+        msg['To'] = recipient
         server = smtplib.SMTP(config.get("smtp_server"), int(config.get("smtp_port", 587)))
         server.starttls()
         server.login(config.get("smtp_user"), config.get("smtp_pass"))
@@ -165,7 +167,7 @@ def _process_target(target, db, config, now):
                     safe_dates = ", ".join(str(d) for d in raw_dates) if isinstance(raw_dates, list) else str(raw_dates)
                     db.add(AlertDraft(target_id=target.id, topic=str(ai_data.get('Topic')), summary_raw=str(ai_data.get('Summary')), detected_dates=safe_dates))
                     db.add(ScanLog(target_id=target.id, status_message=f"Change Detected: {ai_data.get('Topic')} sent to Triage."))
-                    send_alert_email(config, target.resource, ai_data.get('Topic'))
+                    send_alert_email(config, target.resource, ai_data.get('Topic'), target.alert_email)
                 else:
                     db.add(ScanLog(target_id=target.id, status_message="Text changed, but AI found no meaningful content differences."))
             except Exception as e:

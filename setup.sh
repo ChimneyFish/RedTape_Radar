@@ -15,7 +15,8 @@ BIND_IP=$(hostname -I | awk '{print $1}')
 echo "----------------------------------------------------"
 echo "Installing System Dependencies..."
 sudo apt-get update -y
-sudo apt-get install -y python3-venv python3-pip redis-server curl openssl
+sudo apt-get install -y python3-venv python3-pip redis-server curl openssl \
+    build-essential pkg-config libxml2-dev libxmlsec1-dev libxmlsec1-openssl
 
 echo "Installing Ollama AI Engine..."
 if ! command -v ollama &> /dev/null; then
@@ -35,16 +36,15 @@ source venv/bin/activate
 pip install --upgrade pip > /dev/null 2>&1
 pip install -r requirements.txt
 
-echo "Wiping legacy database to apply new architectural schema..."
-rm -f "$PROJECT_ROOT/redtape_radar.db"
-
+echo "Applying database migrations (existing data is preserved)..."
 echo "Executing Database Build and Injecting Admin Credentials..."
 cat << 'EOF' > "$PROJECT_ROOT/create_admin.py"
 import sys
 from app.models import SessionLocal, engine, Base, User
+from app.migrations import run_migrations
 from app.auth import get_password_hash
 
-Base.metadata.create_all(bind=engine)
+run_migrations(engine, Base)
 db = SessionLocal()
 email = sys.argv[1]
 password = sys.argv[2]

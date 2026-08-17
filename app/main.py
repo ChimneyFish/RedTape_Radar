@@ -12,13 +12,16 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from onelogin.saml2.auth import OneLogin_Saml2_Auth
 import uvicorn
 
 from .models import engine, Base, get_db, PublishedAlert, AlertDraft, MonitoredTarget, AppConfig, User, ScanLog
 from . import auth
+from .migrations import run_migrations
+from . import saml as saml_util
 from .tasks import scan_single_target
 
-Base.metadata.create_all(bind=engine)
+run_migrations(engine, Base)
 app = FastAPI(title="RedTape Radar")
 
 @app.on_event("startup")
@@ -134,6 +137,16 @@ def _get_time_config(db: Session) -> dict:
     return {"timezone": rows.get("timezone", "UTC"), "time_format": rows.get("time_format", "24h")}
 
 
+def _get_saml_config(db: Session) -> dict:
+    rows = {c.key: c.value for c in db.query(AppConfig).filter(AppConfig.key.in_(saml_util.SAML_CONFIG_KEYS)).all()}
+    return {**saml_util.SAML_CONFIG_DEFAULTS, **rows}
+
+
+def _saml_enabled(db: Session) -> bool:
+    cfg = db.query(AppConfig).filter(AppConfig.key == "saml_enabled").first()
+    return bool(cfg and cfg.value == "true")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def view_dashboard(request: Request, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     alerts = db.query(PublishedAlert).order_by(PublishedAlert.published_at.desc()).limit(50).all()
@@ -165,21 +178,25 @@ async def view_settings(request: Request, db: Session = Depends(get_db), admin_u
         "use_ntp": "true", "timezone": "UTC", "time_format": "24h",
         "confluence_url": "", "confluence_email": "",
         "confluence_api_token": "", "confluence_space_key": "",
+        **saml_util.SAML_CONFIG_DEFAULTS,
     }
     current_settings = {**defaults, **settings_dict}
     # Track which secrets are already saved, then strip their values from the context
     saved_secrets = {k for k in _SECRET_KEYS if settings_dict.get(k)}
     for k in _SECRET_KEYS:
         current_settings[k] = ""
+    base_url = str(request.base_url).rstrip("/")
     return templates.TemplateResponse(request=request, name="settings.html", context={
         "user": admin_user, "settings": current_settings,
         "system_users": users, "targets": targets, "saved_secrets": saved_secrets,
+        "sp_entity_id": f"{base_url}/saml/metadata", "sp_acs_url": f"{base_url}/saml/acs",
     })
 
 
 @app.get("/local-login", response_class=HTMLResponse)
-async def view_local_login(request: Request):
-    return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": None})
+async def view_local_login(request: Request, db: Session = Depends(get_db)):
+    return templates.TemplateResponse(request=request, name="login.html",
+        context={"user": None, "error": None, "saml_enabled": _saml_enabled(db)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -189,14 +206,16 @@ async def view_local_login(request: Request):
 @app.post("/api/local-login")
 async def process_local_login(request: Request, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     client_ip = request.client.host
+    saml_enabled = _saml_enabled(db)
     if _is_rate_limited(client_ip):
         return templates.TemplateResponse(request=request, name="login.html",
-            context={"user": None, "error": "Too many failed login attempts. Please wait 5 minutes."})
+            context={"user": None, "error": "Too many failed login attempts. Please wait 5 minutes.", "saml_enabled": saml_enabled})
 
     user = db.query(User).filter(User.email == email).first()
-    if not user or not auth.verify_password(password, user.hashed_password):
+    if not user or not user.hashed_password or not auth.verify_password(password, user.hashed_password):
         _record_failed_login(client_ip)
-        return templates.TemplateResponse(request=request, name="login.html", context={"user": None, "error": "Invalid credentials"})
+        return templates.TemplateResponse(request=request, name="login.html",
+            context={"user": None, "error": "Invalid credentials", "saml_enabled": saml_enabled})
 
     if user.must_change_password:
         return templates.TemplateResponse(request=request, name="reset_password.html", context={"email": user.email})
@@ -228,6 +247,124 @@ async def logout():
     response = RedirectResponse(url="/local-login", status_code=303)
     response.delete_cookie("local_session")
     return response
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SSO (SAML / Microsoft Entra ID)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/saml/metadata")
+async def saml_sp_metadata(request: Request, db: Session = Depends(get_db)):
+    config = _get_saml_config(db)
+    base_url = str(request.base_url).rstrip("/")
+    metadata, errors = saml_util.build_sp_metadata_xml(config, base_url)
+    if errors:
+        raise HTTPException(status_code=500, detail=f"Invalid SP metadata: {', '.join(errors)}")
+    return Response(
+        content=metadata, media_type="application/xml",
+        headers={"Content-Disposition": "attachment; filename=redtape_radar_sp_metadata.xml"},
+    )
+
+
+@app.get("/saml/login")
+async def saml_login(request: Request, db: Session = Depends(get_db)):
+    config = _get_saml_config(db)
+    if config.get("saml_enabled") != "true":
+        raise HTTPException(status_code=404)
+    req_data = await saml_util.prepare_fastapi_request(request)
+    base_url = str(request.base_url).rstrip("/")
+    saml_auth = OneLogin_Saml2_Auth(req_data, saml_util.build_saml_settings(config, base_url))
+    return RedirectResponse(url=saml_auth.login(), status_code=303)
+
+
+@app.post("/saml/acs")
+async def saml_acs(request: Request, db: Session = Depends(get_db)):
+    config = _get_saml_config(db)
+    if config.get("saml_enabled") != "true":
+        raise HTTPException(status_code=404)
+    saml_enabled = True
+
+    req_data = await saml_util.prepare_fastapi_request(request)
+    base_url = str(request.base_url).rstrip("/")
+    saml_auth = OneLogin_Saml2_Auth(req_data, saml_util.build_saml_settings(config, base_url))
+    saml_auth.process_response()
+    errors = saml_auth.get_errors()
+    if errors or not saml_auth.is_authenticated():
+        reason = saml_auth.get_last_error_reason() or ", ".join(errors) or "Unknown error"
+        return templates.TemplateResponse(request=request, name="login.html",
+            context={"user": None, "error": f"SSO login failed: {reason}", "saml_enabled": saml_enabled})
+
+    email = saml_auth.get_nameid()
+    if not email:
+        return templates.TemplateResponse(request=request, name="login.html",
+            context={"user": None, "error": "SSO login failed: no email/NameID returned by the identity provider.", "saml_enabled": saml_enabled})
+
+    display_name = saml_util.extract_display_name(saml_auth.get_attributes())
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        if config.get("saml_auto_provision") != "true":
+            return templates.TemplateResponse(request=request, name="login.html",
+                context={"user": None, "error": f"No account provisioned for {email}. Contact your administrator.", "saml_enabled": saml_enabled})
+        user = User(
+            email=email, name=display_name or email, role=config.get("saml_default_role", "read_only"),
+            is_local=False, is_active=True,
+        )
+        db.add(user)
+    elif not user.is_active:
+        return templates.TemplateResponse(request=request, name="login.html",
+            context={"user": None, "error": "This account has been disabled.", "saml_enabled": saml_enabled})
+    elif display_name and not user.name:
+        user.name = display_name
+
+    user.last_login = datetime.utcnow()
+    db.commit()
+
+    token = auth.create_local_token(user.email)
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(key="local_session", value=token, httponly=True, max_age=86400)
+    return response
+
+
+@app.get("/saml/sls")
+async def saml_sls(request: Request, db: Session = Depends(get_db)):
+    config = _get_saml_config(db)
+    if config.get("saml_enabled") != "true":
+        raise HTTPException(status_code=404)
+    req_data = await saml_util.prepare_fastapi_request(request)
+    base_url = str(request.base_url).rstrip("/")
+    saml_auth = OneLogin_Saml2_Auth(req_data, saml_util.build_saml_settings(config, base_url))
+    redirect_url = saml_auth.process_slo(delete_session_cb=lambda: None)
+    response = RedirectResponse(url=redirect_url or "/local-login", status_code=303)
+    response.delete_cookie("local_session")
+    return response
+
+
+@app.post("/api/settings/saml/import-metadata")
+async def import_idp_metadata(
+    idp_metadata_file: UploadFile = File(...),
+    db: Session = Depends(get_db), admin: User = Depends(auth.require_admin),
+):
+    content = await idp_metadata_file.read()
+    try:
+        parsed = saml_util.parse_idp_metadata(content)
+    except Exception as e:
+        return RedirectResponse(url=f"/settings?error={urllib.parse.quote(f'Could not parse metadata XML: {e}')}", status_code=303)
+
+    if not parsed.get("idp_sso_url") or not parsed.get("idp_x509_cert"):
+        return RedirectResponse(
+            url="/settings?error=Metadata+file+did+not+contain+a+SingleSignOnService+URL+or+signing+certificate.",
+            status_code=303,
+        )
+
+    for key, value in parsed.items():
+        cfg = db.query(AppConfig).filter(AppConfig.key == key).first()
+        if cfg:
+            cfg.value = value
+        else:
+            db.add(AppConfig(key=key, value=value, is_secret=False))
+    db.commit()
+    return RedirectResponse(url="/settings?success=Entra+ID+metadata+imported.", status_code=303)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -334,7 +471,7 @@ async def export_settings(db: Session = Depends(get_db), admin: User = Depends(a
         "config": {c.key: c.value for c in configs},
         "targets": [
             {"resource": t.resource, "url": t.url, "extraction_mode": t.extraction_mode,
-             "scan_frequency": t.scan_frequency, "recursive": t.recursive}
+             "scan_frequency": t.scan_frequency, "recursive": t.recursive, "alert_email": t.alert_email}
             for t in targets
         ],
     }
@@ -366,6 +503,7 @@ async def import_settings(backup_file: UploadFile = File(...), db: Session = Dep
                         extraction_mode=t.get("extraction_mode", "auto_clean"),
                         scan_frequency=t.get("scan_frequency", "weekly"),
                         recursive=t.get("recursive", False),
+                        alert_email=t.get("alert_email"),
                     ))
         db.commit()
     except Exception as e:
@@ -397,16 +535,44 @@ async def upload_certificate(
 @app.post("/api/targets")
 async def add_monitored_target(
     url: str = Form(...), resource: str = Form(...), mode: str = Form("auto_clean"),
-    frequency: str = Form("weekly"), recursive: str = Form("false"),
+    frequency: str = Form("weekly"), recursive: str = Form("false"), alert_email: str = Form(""),
     db: Session = Depends(get_db), editor_user: User = Depends(auth.require_editor),
 ):
     new_target = MonitoredTarget(
         url=url, resource=resource, extraction_mode=mode,
         scan_frequency=frequency, recursive=(recursive == "true"),
+        alert_email=(alert_email.strip() or None),
     )
     db.add(new_target)
     db.commit()
     scan_single_target.delay(new_target.id)
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@app.post("/api/targets/{target_id}/update")
+async def update_monitored_target(
+    target_id: int, url: str = Form(...), resource: str = Form(...), mode: str = Form("auto_clean"),
+    frequency: str = Form("weekly"), recursive: str = Form("false"), alert_email: str = Form(""),
+    db: Session = Depends(get_db), editor_user: User = Depends(auth.require_editor),
+):
+    target = db.query(MonitoredTarget).filter(MonitoredTarget.id == target_id).first()
+    if target:
+        url_changed = target.url != url
+        target.url = url
+        target.resource = resource
+        target.extraction_mode = mode
+        target.scan_frequency = frequency
+        target.recursive = (recursive == "true")
+        target.alert_email = alert_email.strip() or None
+        if url_changed:
+            # Old hash/text belong to a different page now -- re-baseline instead
+            # of diffing unrelated content on the next scan.
+            target.last_hash = None
+            target.last_text = None
+            target.last_scanned = None
+        db.commit()
+        if url_changed:
+            scan_single_target.delay(target.id)
     return RedirectResponse(url="/settings", status_code=303)
 
 
