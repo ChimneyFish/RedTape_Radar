@@ -395,6 +395,30 @@ async def force_user_reset(target_id: int, db: Session = Depends(get_db), admin:
     return RedirectResponse(url="/settings", status_code=303)
 
 
+@app.post("/api/users/{target_id}/role")
+async def update_user_role(
+    target_id: int, role: str = Form(...),
+    db: Session = Depends(get_db), admin: User = Depends(auth.require_admin),
+):
+    if role not in ("read_only", "editor", "admin"):
+        raise HTTPException(status_code=400, detail="Invalid role.")
+    target = db.query(User).filter(User.id == target_id).first()
+    if not target:
+        return RedirectResponse(url="/settings", status_code=303)
+
+    if target.id == admin.id and role != "admin":
+        remaining_admins = db.query(User).filter(User.role == "admin", User.id != target.id, User.is_active == True).count()
+        if remaining_admins == 0:
+            return RedirectResponse(
+                url="/settings?error=Can't+remove+admin+role+from+the+only+active+administrator.",
+                status_code=303,
+            )
+
+    target.role = role
+    db.commit()
+    return RedirectResponse(url="/settings", status_code=303)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Settings
 # ─────────────────────────────────────────────────────────────────────────────

@@ -15,19 +15,33 @@
 <div class="card">
     <h2>System Users</h2>
     <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
-        <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr>
+        <tr><th>Name</th><th>Email</th><th>Source</th><th>Role</th><th>Status</th></tr>
         {% for u in system_users %}
         <tr>
             <td>{{ u.name }}</td>
             <td>{{ u.email }}</td>
-            <td>{{ u.role | upper }}</td>
+            <td style="font-size: 0.85em;">{{ 'Local' if u.is_local else 'SSO' }}</td>
             <td>
-                {% if not u.must_change_password %}
-                <form action="/api/users/{{ u.id }}/force-reset" method="post" style="display:inline;">
-                    <button type="submit" style="background-color: #ffc107; color: black; padding: 2px 8px; font-size: 0.8em;">Force Reset</button>
+                <form action="/api/users/{{ u.id }}/role" method="post" style="display:flex; gap:4px; align-items:center;">
+                    <select name="role" style="font-size: 0.85em;">
+                        <option value="read_only" {% if u.role == 'read_only' %}selected{% endif %}>Read-Only User</option>
+                        <option value="editor" {% if u.role == 'editor' %}selected{% endif %}>Target Editor (URLs Only)</option>
+                        <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>System Administrator</option>
+                    </select>
+                    <button type="submit" style="padding: 2px 8px; font-size: 0.8em;">Save</button>
                 </form>
+            </td>
+            <td>
+                {% if u.is_local %}
+                    {% if not u.must_change_password %}
+                    <form action="/api/users/{{ u.id }}/force-reset" method="post" style="display:inline;">
+                        <button type="submit" style="background-color: #ffc107; color: black; padding: 2px 8px; font-size: 0.8em;">Force Reset</button>
+                    </form>
+                    {% else %}
+                    <span style="color: red;">Reset Pending</span>
+                    {% endif %}
                 {% else %}
-                <span style="color: red;">Reset Pending</span>
+                <span style="color: #666;">SSO Managed</span>
                 {% endif %}
             </td>
         </tr>
