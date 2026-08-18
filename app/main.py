@@ -150,10 +150,17 @@ def _saml_enabled(db: Session) -> bool:
 @app.get("/", response_class=HTMLResponse)
 async def view_dashboard(request: Request, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     alerts = db.query(PublishedAlert).order_by(PublishedAlert.published_at.desc()).limit(50).all()
-    logs = db.query(ScanLog).order_by(ScanLog.timestamp.desc()).limit(20).all()
-    time_cfg = _get_time_config(db)
     return templates.TemplateResponse(request=request, name="dashboard.html", context={
-        "user": current_user, "alerts": alerts, "logs": logs,
+        "user": current_user, "alerts": alerts,
+    })
+
+
+@app.get("/activity", response_class=HTMLResponse)
+async def view_activity_logs(request: Request, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    logs = db.query(ScanLog).order_by(ScanLog.timestamp.desc()).limit(200).all()
+    time_cfg = _get_time_config(db)
+    return templates.TemplateResponse(request=request, name="activity.html", context={
+        "user": current_user, "logs": logs,
         "time_format": time_cfg["time_format"], "timezone": time_cfg["timezone"],
     })
 

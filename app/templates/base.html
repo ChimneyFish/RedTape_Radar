@@ -31,6 +31,9 @@
 
         <div class="nav-links">
             <a href="/">Dashboard</a>
+            {% if user %}
+            <a href="/activity">Activity Logs</a>
+            {% endif %}
             {% if user and user.role == 'admin' %}
             <a href="/triage">Triage Inbox</a>
             <a href="/settings">Settings</a>
