@@ -29,8 +29,21 @@ else
     echo "Ollama is already installed. Skipping..."
 fi
 
-echo "Creating Python Virtual Environment..."
+echo "----------------------------------------------------"
+echo "Pulling latest application code..."
 cd "$PROJECT_ROOT"
+if [ -d ".git" ]; then
+    if [ -z "$(git status --porcelain)" ]; then
+        git pull
+    else
+        echo "Warning: uncommitted local changes detected in $PROJECT_ROOT -- skipping git pull."
+        echo "Commit or stash your changes and re-run setup.sh to pick up the latest code."
+    fi
+else
+    echo "Warning: $PROJECT_ROOT is not a git repository -- skipping git pull."
+fi
+
+echo "Creating Python Virtual Environment..."
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip > /dev/null 2>&1
