@@ -453,6 +453,25 @@ async def reactivate_user(target_id: int, db: Session = Depends(get_db), admin: 
     return RedirectResponse(url="/settings", status_code=303)
 
 
+@app.post("/api/users/{target_id}/delete")
+async def delete_user(target_id: int, db: Session = Depends(get_db), admin: User = Depends(auth.require_admin)):
+    target = db.query(User).filter(User.id == target_id).first()
+    if not target:
+        return RedirectResponse(url="/settings", status_code=303)
+
+    if target.id == admin.id:
+        return RedirectResponse(url="/settings?error=You+can't+delete+your+own+account+while+logged+in.", status_code=303)
+
+    if target.role == "admin":
+        remaining_admins = db.query(User).filter(User.role == "admin", User.id != target.id, User.is_active == True).count()
+        if remaining_admins == 0:
+            return RedirectResponse(url="/settings?error=Can't+delete+the+only+active+administrator.", status_code=303)
+
+    db.delete(target)
+    db.commit()
+    return RedirectResponse(url="/settings", status_code=303)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Settings
 # ─────────────────────────────────────────────────────────────────────────────
