@@ -395,9 +395,9 @@ async def force_user_reset(target_id: int, db: Session = Depends(get_db), admin:
     return RedirectResponse(url="/settings", status_code=303)
 
 
-@app.post("/api/users/{target_id}/role")
-async def update_user_role(
-    target_id: int, role: str = Form(...),
+@app.post("/api/users/{target_id}/edit")
+async def edit_user(
+    target_id: int, name: str = Form(...), email: str = Form(...), role: str = Form(...),
     db: Session = Depends(get_db), admin: User = Depends(auth.require_admin),
 ):
     if role not in ("read_only", "editor", "admin"):
@@ -405,6 +405,10 @@ async def update_user_role(
     target = db.query(User).filter(User.id == target_id).first()
     if not target:
         return RedirectResponse(url="/settings", status_code=303)
+
+    email = email.strip()
+    if email != target.email and db.query(User).filter(User.email == email, User.id != target.id).first():
+        return RedirectResponse(url="/settings?error=Another+account+already+uses+that+email.", status_code=303)
 
     if target.id == admin.id and role != "admin":
         remaining_admins = db.query(User).filter(User.role == "admin", User.id != target.id, User.is_active == True).count()
@@ -414,8 +418,38 @@ async def update_user_role(
                 status_code=303,
             )
 
+    target.name = name.strip()
+    target.email = email
     target.role = role
     db.commit()
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@app.post("/api/users/{target_id}/deactivate")
+async def deactivate_user(target_id: int, db: Session = Depends(get_db), admin: User = Depends(auth.require_admin)):
+    target = db.query(User).filter(User.id == target_id).first()
+    if not target:
+        return RedirectResponse(url="/settings", status_code=303)
+
+    if target.role == "admin":
+        remaining_admins = db.query(User).filter(User.role == "admin", User.id != target.id, User.is_active == True).count()
+        if remaining_admins == 0:
+            return RedirectResponse(
+                url="/settings?error=Can't+disable+the+only+active+administrator.",
+                status_code=303,
+            )
+
+    target.is_active = False
+    db.commit()
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@app.post("/api/users/{target_id}/reactivate")
+async def reactivate_user(target_id: int, db: Session = Depends(get_db), admin: User = Depends(auth.require_admin)):
+    target = db.query(User).filter(User.id == target_id).first()
+    if target:
+        target.is_active = True
+        db.commit()
     return RedirectResponse(url="/settings", status_code=303)
 
 

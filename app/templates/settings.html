@@ -15,34 +15,61 @@
 <div class="card">
     <h2>System Users</h2>
     <table border="1" width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
-        <tr><th>Name</th><th>Email</th><th>Source</th><th>Role</th><th>Status</th></tr>
+        <tr><th>Name</th><th>Email</th><th>Source</th><th>Role</th><th>Status</th><th>Action</th></tr>
         {% for u in system_users %}
-        <tr>
+        <tr {% if not u.is_active %}style="color: #999;"{% endif %}>
             <td>{{ u.name }}</td>
             <td>{{ u.email }}</td>
             <td style="font-size: 0.85em;">{{ 'Local' if u.is_local else 'SSO' }}</td>
+            <td style="font-size: 0.9em;">
+                {% if u.role == 'admin' %}System Administrator
+                {% elif u.role == 'editor' %}Target Editor (URLs Only)
+                {% else %}Read-Only User{% endif %}
+            </td>
             <td>
-                <form action="/api/users/{{ u.id }}/role" method="post" style="display:flex; gap:4px; align-items:center;">
-                    <select name="role" style="font-size: 0.85em;">
+                {% if u.is_active %}
+                <span style="color: #155724; background: #d4edda; padding: 2px 8px; border-radius: 4px; font-size: 0.85em;">Active</span>
+                {% else %}
+                <span style="color: #721c24; background: #f8d7da; padding: 2px 8px; border-radius: 4px; font-size: 0.85em;">Disabled</span>
+                {% endif %}
+                {% if u.is_local %}
+                    {% if u.must_change_password %}
+                    <br><span style="color: red; font-size: 0.8em;">Reset Pending</span>
+                    {% endif %}
+                {% else %}
+                <br><span style="color: #666; font-size: 0.8em;">SSO Managed</span>
+                {% endif %}
+            </td>
+            <td style="white-space: nowrap;">
+                <button type="button" onclick="var r=document.getElementById('edit-user-row-{{ u.id }}'); r.style.display = (r.style.display === 'table-row') ? 'none' : 'table-row';"
+                        style="background-color: #6c757d; padding: 5px 10px; font-size: 0.8em;">Edit</button>
+                {% if u.is_active %}
+                <form action="/api/users/{{ u.id }}/deactivate" method="post" style="display:inline;"
+                      onsubmit="return confirm('Disable access for {{ u.email }}? They will not be able to log in, including via SSO, until re-enabled.');">
+                    <button type="submit" style="background-color: #dc3545; padding: 5px 10px; font-size: 0.8em;">Disable</button>
+                </form>
+                {% else %}
+                <form action="/api/users/{{ u.id }}/reactivate" method="post" style="display:inline;">
+                    <button type="submit" style="background-color: #28a745; padding: 5px 10px; font-size: 0.8em;">Enable</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        <tr id="edit-user-row-{{ u.id }}" style="display:none; background:#f9f9f9;">
+            <td colspan="6">
+                <form action="/api/users/{{ u.id }}/edit" method="post" style="padding: 10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <input type="text" name="name" value="{{ u.name }}" placeholder="Full Name" required style="width: 25%;">
+                    <input type="email" name="email" value="{{ u.email }}" placeholder="email@domain.com" required style="width: 30%;">
+                    <select name="role">
                         <option value="read_only" {% if u.role == 'read_only' %}selected{% endif %}>Read-Only User</option>
                         <option value="editor" {% if u.role == 'editor' %}selected{% endif %}>Target Editor (URLs Only)</option>
                         <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>System Administrator</option>
                     </select>
-                    <button type="submit" style="padding: 2px 8px; font-size: 0.8em;">Save</button>
-                </form>
-            </td>
-            <td>
-                {% if u.is_local %}
-                    {% if not u.must_change_password %}
-                    <form action="/api/users/{{ u.id }}/force-reset" method="post" style="display:inline;">
-                        <button type="submit" style="background-color: #ffc107; color: black; padding: 2px 8px; font-size: 0.8em;">Force Reset</button>
-                    </form>
-                    {% else %}
-                    <span style="color: red;">Reset Pending</span>
+                    <button type="submit" style="background-color: #28a745; padding: 5px 10px;">Save</button>
+                    {% if u.is_local and not u.must_change_password %}
+                    <button type="submit" formaction="/api/users/{{ u.id }}/force-reset" style="background-color: #ffc107; color: black; padding: 5px 10px;">Force Password Reset</button>
                     {% endif %}
-                {% else %}
-                <span style="color: #666;">SSO Managed</span>
-                {% endif %}
+                </form>
             </td>
         </tr>
         {% endfor %}
