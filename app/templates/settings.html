@@ -364,10 +364,11 @@
 
 <div class="card" style="border-left: 5px solid #17a2b8;">
     <h2>Backup &amp; Restore</h2>
-    <p style="color: #666;">Export your targets and API settings to a JSON file, or restore them from a previous backup.</p>
+    <p style="color: #666;">Export a single file containing everything needed to stand this instance up on a new server or EC2 instance exactly as it is now: system configuration (incl. AI/SMTP/SAML/Confluence API keys), monitored targets and their scan state, user accounts (with password hashes and roles), scan history, the triage queue, published alerts, and the TLS certificate/key.</p>
+    <p style="color: #a94442;"><b>This file contains plaintext API keys, SMTP credentials, the SAML signing certificate, and password hashes — handle and store it like any other credential.</b></p>
 
     <form action="/api/settings/export" method="get" style="margin-bottom: 20px;">
-        <button type="submit" style="background-color: #17a2b8;">Export Configuration (Download)</button>
+        <button type="submit" style="background-color: #17a2b8;">Export Full Backup (Download)</button>
     </form>
 
     <form action="/api/settings/import" method="post" enctype="multipart/form-data" style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
@@ -375,6 +376,7 @@
         <input type="file" name="backup_file" accept=".json" required><br><br>
         <button type="submit" style="background-color: #28a745;">Import &amp; Apply</button>
     </form>
+    <p style="color: #666; font-size: 0.9em;">Users, targets, and published alerts are matched by email/URL and skipped if they already exist, so it's safe to import into a fresh install. Restart the service after importing to pick up the restored TLS certificate.</p>
 </div>
 
 {% endif %}

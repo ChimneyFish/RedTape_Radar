@@ -551,19 +551,57 @@ async def get_clock_config(db: Session = Depends(get_db)):
 async def export_settings(db: Session = Depends(get_db), admin: User = Depends(auth.require_admin)):
     configs = db.query(AppConfig).all()
     targets = db.query(MonitoredTarget).all()
+    users = db.query(User).all()
+    scan_logs = db.query(ScanLog).all()
+    drafts = db.query(AlertDraft).all()
+    published = db.query(PublishedAlert).all()
+
+    cert_path = os.path.join(CERT_DIR, "server.crt")
+    key_path = os.path.join(CERT_DIR, "server.key")
+    tls_cert = open(cert_path).read() if os.path.exists(cert_path) else None
+    tls_key = open(key_path).read() if os.path.exists(key_path) else None
+
     export_data = {
+        "version": 2,
         "config": {c.key: c.value for c in configs},
+        "users": [
+            {"email": u.email, "name": u.name, "role": u.role, "is_active": u.is_active,
+             "is_local": u.is_local, "hashed_password": u.hashed_password,
+             "must_change_password": u.must_change_password}
+            for u in users
+        ],
         "targets": [
             {"resource": t.resource, "url": t.url, "extraction_mode": t.extraction_mode,
              "scan_frequency": t.scan_frequency, "recursive": t.recursive, "alert_email": t.alert_email,
-             "alert_on_broken_link": t.alert_on_broken_link}
+             "alert_on_broken_link": t.alert_on_broken_link, "is_active": t.is_active,
+             "last_hash": t.last_hash, "last_text": t.last_text,
+             "last_scanned": t.last_scanned.isoformat() if t.last_scanned else None,
+             "consecutive_failures": t.consecutive_failures, "is_broken": t.is_broken}
             for t in targets
         ],
+        "scan_logs": [
+            {"target_url": log.target.url, "timestamp": log.timestamp.isoformat(), "status_message": log.status_message}
+            for log in scan_logs
+        ],
+        "alert_drafts": [
+            {"target_url": d.target.url, "topic": d.topic, "summary_raw": d.summary_raw,
+             "detected_dates": d.detected_dates, "created_at": d.created_at.isoformat(),
+             "is_reviewed": d.is_reviewed}
+            for d in drafts
+        ],
+        "published_alerts": [
+            {"resource": p.resource, "url": p.url, "topic": p.topic, "summary": p.summary,
+             "actionable_steps": p.actionable_steps, "key_deadlines": p.key_deadlines,
+             "published_at": p.published_at.isoformat()}
+            for p in published
+        ],
+        "tls_cert": tls_cert,
+        "tls_key": tls_key,
     }
     return Response(
         content=json.dumps(export_data, indent=4),
         media_type="application/json",
-        headers={"Content-Disposition": "attachment; filename=redtape_backup.json"},
+        headers={"Content-Disposition": "attachment; filename=redtape_full_backup.json"},
     )
 
 
@@ -572,6 +610,7 @@ async def import_settings(backup_file: UploadFile = File(...), db: Session = Dep
     content = await backup_file.read()
     try:
         data = json.loads(content)
+
         if "config" in data:
             for key, value in data["config"].items():
                 cfg = db.query(AppConfig).filter(AppConfig.key == key).first()
@@ -579,19 +618,79 @@ async def import_settings(backup_file: UploadFile = File(...), db: Session = Dep
                     cfg.value = value
                 else:
                     db.add(AppConfig(key=key, value=value, is_secret=(key in _SECRET_KEYS)))
+
+        if "users" in data:
+            for u in data["users"]:
+                if not db.query(User).filter(User.email == u.get("email")).first():
+                    db.add(User(
+                        email=u.get("email"), name=u.get("name"), role=u.get("role", "read_only"),
+                        is_active=u.get("is_active", True), is_local=u.get("is_local", False),
+                        hashed_password=u.get("hashed_password"),
+                        must_change_password=u.get("must_change_password", False),
+                    ))
+
+        target_by_url = {}
         if "targets" in data:
             for t in data["targets"]:
-                existing = db.query(MonitoredTarget).filter(MonitoredTarget.url == t.get("url")).first()
-                if not existing:
-                    db.add(MonitoredTarget(
+                target = db.query(MonitoredTarget).filter(MonitoredTarget.url == t.get("url")).first()
+                if not target:
+                    last_scanned = t.get("last_scanned")
+                    target = MonitoredTarget(
                         resource=t.get("resource"), url=t.get("url"),
                         extraction_mode=t.get("extraction_mode", "auto_clean"),
                         scan_frequency=t.get("scan_frequency", "weekly"),
                         recursive=t.get("recursive", False),
                         alert_email=t.get("alert_email"),
                         alert_on_broken_link=t.get("alert_on_broken_link", True),
+                        is_active=t.get("is_active", True),
+                        last_hash=t.get("last_hash"),
+                        last_text=t.get("last_text"),
+                        last_scanned=datetime.fromisoformat(last_scanned) if last_scanned else None,
+                        consecutive_failures=t.get("consecutive_failures", 0),
+                        is_broken=t.get("is_broken", False),
+                    )
+                    db.add(target)
+                    db.flush()  # assign an id so scan_logs/alert_drafts below can reference it
+                target_by_url[t.get("url")] = target
+
+        if "scan_logs" in data:
+            for log in data["scan_logs"]:
+                target = target_by_url.get(log.get("target_url"))
+                if target:
+                    db.add(ScanLog(
+                        target_id=target.id, timestamp=datetime.fromisoformat(log["timestamp"]),
+                        status_message=log.get("status_message", ""),
                     ))
+
+        if "alert_drafts" in data:
+            for d in data["alert_drafts"]:
+                target = target_by_url.get(d.get("target_url"))
+                if target:
+                    db.add(AlertDraft(
+                        target_id=target.id, topic=d.get("topic"), summary_raw=d.get("summary_raw"),
+                        detected_dates=d.get("detected_dates"),
+                        created_at=datetime.fromisoformat(d["created_at"]) if d.get("created_at") else datetime.utcnow(),
+                        is_reviewed=d.get("is_reviewed", False),
+                    ))
+
+        if "published_alerts" in data:
+            for p in data["published_alerts"]:
+                db.add(PublishedAlert(
+                    resource=p.get("resource"), url=p.get("url"), topic=p.get("topic"),
+                    summary=p.get("summary"), actionable_steps=p.get("actionable_steps"),
+                    key_deadlines=p.get("key_deadlines"),
+                    published_at=datetime.fromisoformat(p["published_at"]) if p.get("published_at") else datetime.utcnow(),
+                ))
+
         db.commit()
+
+        if data.get("tls_cert") and data.get("tls_key"):
+            os.makedirs(CERT_DIR, exist_ok=True)
+            with open(os.path.join(CERT_DIR, "server.crt"), "w") as f:
+                f.write(data["tls_cert"])
+            with open(os.path.join(CERT_DIR, "server.key"), "w") as f:
+                f.write(data["tls_key"])
+            os.chmod(os.path.join(CERT_DIR, "server.key"), 0o600)
     except Exception as e:
         print(f"Import failed: {e}")
     return RedirectResponse(url="/settings?success=true", status_code=303)
